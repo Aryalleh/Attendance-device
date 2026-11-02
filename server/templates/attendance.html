@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}حضور و غیاب · کنترل تردد{% endblock %}
+{% block body %}
+<div class="row" style="margin-bottom:12px">
+  <h1>حضور و غیاب — {{ day|jlong }}</h1>
+  <a class="btn sec auto" href="{{ url_for('attendance', date=prev|jstr) }}" title="روز قبل">→</a>
+  <form class="auto" method="get"><input name="date" dir="ltr" value="{{ day|jstr }}" style="width:9em" onchange="this.form.submit()"></form>
+  <a class="btn sec auto" href="{{ url_for('attendance', date=next|jstr) }}" title="روز بعد">←</a>
+</div>
+<div class="box scroll">
+<table>
+<thead><tr><th>نام</th><th>اولین ورود</th><th>آخرین خروج</th><th>مدت حضور</th><th>تعداد تردد</th></tr></thead>
+<tbody>
+{% for r in rows %}
+{% set a = r.first_in or r.first_seen %}{% set b = r.last_out %}
+<tr>
+  <td><a href="{{ url_for('card_edit', card_id=r.id) }}">{{ r.name }}</a></td>
+  <td>{{ r.first_in|jtime if r.first_in else '—' }}</td>
+  <td>{{ r.last_out|jtime if r.last_out else '—' }}</td>
+  <td>{% if b and b > a %}{{ ((b - a) // 3600)|fa }} ساعت و {{ (((b - a) % 3600) // 60)|fa }} دقیقه{% else %}<span class="mut">—</span>{% endif %}</td>
+  <td>{{ r.scans|fa }} <a class="mut" href="{{ url_for('events', q=r.uid, **{'from': day|jstr, 'to': day|jstr}) }}">جزئیات</a></td>
+</tr>
+{% else %}
+<tr><td colspan="5" class="mut">در این روز ترددی ثبت نشده است.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "_macros.html" import events_table, csrf %}
+{% block title %}{{ 'کارت جدید' if new else card.name }} · کنترل تردد{% endblock %}
+{% block body %}
+<h1>{{ 'کارت جدید' if new else 'ویرایش کارت' }}</h1>
+<div class="box">
+<form method="post">
+  {{ csrf() }}
+  <div class="row">
+    <div><label>نام و نام خانوادگی</label><input name="name" value="{{ card.name or '' }}" maxlength="32" required autofocus></div>
+    <div><label>شناسه کارت (UID)</label><input name="uid" class="mono" value="{{ card.uid or '' }}" placeholder="04:A3:1B:2C" required></div>
+  </div>
+  <div class="row">
+    <div><label>توضیحات (واحد، تلفن، …)</label><input name="note" value="{{ card.note or '' }}" maxlength="200"></div>
+    <div><label>اعتبار تا تاریخ (خالی = بدون انقضا)</label><input name="valid_until" dir="ltr" value="{{ card.valid_until|jinput }}" placeholder="1405/12/29"></div>
+  </div>
+  <label class="check"><input type="checkbox" name="enabled" value="1" {{ 'checked' if card.enabled and card.enabled != '0' }}> دسترسی مجاز است</label>
+  <p class="row">
+    <button class="btn auto">ذخیره</button>
+    <a class="btn sec auto" href="{{ url_for('cards') }}">انصراف</a>
+  </p>
+</form>
+{% if new %}<p class="mut">راهنما: شناسه کارت را نمی‌دانید؟ کارت را جلوی یکی از دستگاه‌ها بگیرید؛ در داشبورد زیر «کارت‌های ثبت‌نشده» ظاهر می‌شود.</p>{% endif %}
+</div>
+
+{% if not new %}
+<div class="box">
+  <h2>سوابق تردد</h2>
+  {{ events_table(history) }}
+</div>
+<form method="post" action="{{ url_for('card_delete', card_id=card_id) }}" onsubmit="return confirm('این کارت حذف شود؟')">
+  {{ csrf() }}<button class="btn red">حذف کارت</button>
+</form>
+{% endif %}
+{% endblock %}

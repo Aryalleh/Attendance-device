@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}کنترل تردد{% endblock %}</title>
+<link rel="preload" href="{{ url_for('static', filename='fonts/Vazirmatn.woff2') }}" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+{% if session.user %}
+<header><div class="in">
+  <span class="brand">🔑 کنترل تردد</span>
+  <nav>
+    {% for ep, label in [('dashboard','داشبورد'),('cards','کارت‌ها'),('doors','درها'),('events','گزارش تردد'),('attendance','حضور و غیاب'),('settings','تنظیمات')] %}
+    <a href="{{ url_for(ep) }}" class="{{ 'on' if request.endpoint == ep or (ep == 'cards' and request.endpoint in ('card_new','card_edit')) }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+  <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn sec sm">خروج ({{ session.user }})</button></form>
+</div></header>
+{% endif %}
+<main>
+{% for cat, msg in get_flashed_messages(with_categories=true) %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+{% block body %}{% endblock %}
+</main>
+</body>
+</html>

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}تنظیمات · کنترل تردد{% endblock %}
+{% block body %}
+<h1>تنظیمات</h1>
+<div class="grid">
+  <div class="box">
+    <h2>تغییر رمز عبور من</h2>
+    <form method="post">{{ csrf() }}<input type="hidden" name="action" value="password">
+      <label>رمز فعلی</label><input type="password" dir="ltr" name="current" autocomplete="current-password" required>
+      <label>رمز جدید (حداقل ۸ کاراکتر)</label><input type="password" dir="ltr" name="new" autocomplete="new-password" minlength="8" required>
+      <p><button class="btn">تغییر رمز</button></p>
+    </form>
+  </div>
+
+  <div class="box">
+    <h2>کاربران پنل</h2>
+    <table>
+      {% for u in users %}
+      <tr><td class="ltr">{{ u.username }}{% if u.username == session.user %} <span class="mut">(شما)</span>{% endif %}</td>
+        <td class="end">{% if users|length > 1 %}<form class="inline" method="post" onsubmit="return confirm('کاربر {{ u.username }} حذف شود؟')">{{ csrf() }}<input type="hidden" name="action" value="del_user"><input type="hidden" name="id" value="{{ u.id }}"><button class="btn red sm">حذف</button></form>{% endif %}</td></tr>
+      {% endfor %}
+    </table>
+    <form method="post" class="row">{{ csrf() }}<input type="hidden" name="action" value="add_user">
+      <div><label>نام کاربری</label><input name="username" dir="ltr" required></div>
+      <div><label>رمز عبور</label><input type="password" dir="ltr" name="password" minlength="8" required></div>
+      <div class="auto"><button class="btn">افزودن</button></div>
+    </form>
+  </div>
+
+  <div class="box">
+    <h2>داده‌ها</h2>
+    <p>{{ n_events|fa }} رویداد ذخیره شده است.</p>
+    <form method="post" class="row" onsubmit="return confirm('رویدادهای قدیمی برای همیشه حذف شوند؟')">{{ csrf() }}<input type="hidden" name="action" value="purge">
+      <div><label>حذف رویدادهای قدیمی‌تر از (روز)</label><input type="number" dir="ltr" name="days" min="1" value="365"></div>
+      <div class="auto"><button class="btn red">حذف</button></div>
+    </form>
+  </div>
+
+  <div class="box">
+    <h2>اتصال به سرویس‌های دیگر</h2>
+    <p>API فقط‌خواندنی: {% if api_enabled %}<span class="pill ok">فعال</span>{% else %}<span class="pill mut">غیرفعال</span> — متغیر <span class="mono">ACCESSCTL_API_TOKEN</span> را تنظیم کنید{% endif %}</p>
+    <p class="mono mut" style="font-size:12px;text-align:left">GET /api/v1/presence<br>GET /api/v1/events?since=&lt;last id&gt;<br>Header: Authorization: Bearer &lt;token&gt;</p>
+    <p>Webhook: {% if webhook %}<span class="mono">{{ webhook }}</span>{% else %}<span class="pill mut">غیرفعال</span> — متغیر <span class="mono">ACCESSCTL_WEBHOOK_URL</span> را تنظیم کنید{% endif %}</p>
+  </div>
+</div>
+{% endblock %}

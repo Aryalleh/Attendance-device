@@ -1,0 +1,22 @@
+# systemd unit — copy to /etc/systemd/system/accessctl.service
+# Adjust User and paths, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now accessctl
+#   journalctl -u accessctl -f        # first start prints the admin password
+[Unit]
+Description=RFID access control server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/opt/accessctl/server
+Environment=ACCESSCTL_DATA=/opt/accessctl/data
+Environment=ACCESSCTL_PORT=8080
+# Environment=ACCESSCTL_API_TOKEN=change-me
+# Environment=ACCESSCTL_WEBHOOK_URL=http://127.0.0.1:1880/door
+ExecStart=/opt/accessctl/venv/bin/python app.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}کارت‌ها · کنترل تردد{% endblock %}
+{% block body %}
+<div class="row" style="margin-bottom:12px">
+  <h1>کارت‌ها</h1>
+  <form class="auto" method="get"><input name="q" value="{{ q }}" placeholder="جستجوی نام، شناسه، توضیحات"></form>
+  <a class="btn auto" href="{{ url_for('card_new') }}">+ کارت جدید</a>
+</div>
+<div class="box scroll">
+<table>
+<thead><tr><th>نام</th><th>شناسه کارت</th><th>دسترسی</th><th>وضعیت حضور</th><th>آخرین تردد</th><th></th></tr></thead>
+<tbody>
+{% for c in cards %}
+<tr>
+  <td><a href="{{ url_for('card_edit', card_id=c.id) }}">{{ c.name }}</a>{% if c.note %}<div class="mut" style="font-size:12px">{{ c.note }}</div>{% endif %}</td>
+  <td class="mono">{{ c.uid }}</td>
+  <td>
+    {% if not c.enabled %}<span class="pill bad">مسدود</span>
+    {% elif c.valid_until and c.valid_until < today %}<span class="pill warn">منقضی ({{ c.valid_until|jinput|fa }})</span>
+    {% else %}<span class="pill ok">مجاز</span>{% if c.valid_until %} <span class="mut" style="font-size:12px">تا {{ c.valid_until|jinput|fa }}</span>{% endif %}{% endif %}
+  </td>
+  <td>{% if c.last_dir == 'in' %}<span class="pill ok">داخل</span>{% elif c.last_dir == 'out' %}<span class="pill mut">بیرون</span>{% else %}<span class="mut">—</span>{% endif %}</td>
+  <td class="nowrap mut">{{ c.last_ts|ago }}</td>
+  <td class="nowrap end">
+    <form class="inline" method="post" action="{{ url_for('card_toggle', card_id=c.id) }}">{{ csrf() }}<button class="btn sec sm">{{ 'مسدود کن' if c.enabled else 'مجاز کن' }}</button></form>
+    <a class="btn sec sm" href="{{ url_for('card_edit', card_id=c.id) }}">ویرایش</a>
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="mut">{% if q %}موردی پیدا نشد.{% else %}هنوز کارتی ثبت نشده. یک کارت جدید را جلوی دستگاه بگیرید؛ در داشبورد با دکمه «ثبت کارت» نمایش داده می‌شود.{% endif %}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endblock %}

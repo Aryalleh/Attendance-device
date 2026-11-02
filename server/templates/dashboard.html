@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "_macros.html" import events_table, csrf %}
+{% block title %}داشبورد · کنترل تردد{% endblock %}
+{% block body %}
+<div class="stats">
+  <div class="stat"><b>{{ inside|length|fa }}</b><span>نفر داخل</span></div>
+  <div class="stat"><b>{{ (stats.granted or 0)|fa }}</b><span>تردد مجاز امروز</span></div>
+  <div class="stat"><b>{{ (stats.denied or 0)|fa }}</b><span>تردد رد شده امروز</span></div>
+  <div class="stat"><b>{{ cards|length|fa }}</b><span>کارت ثبت‌شده</span></div>
+</div>
+
+<div class="grid">
+  <div class="box">
+    <h2>درها</h2>
+    {% for d in doors %}
+    <div class="row" style="padding:4px 0">
+      <div><span class="dot {{ 'on' if d.last_seen and d.last_seen >= online_after else 'off' }}"></span>{{ d.name }}
+        <span class="mut">· {{ d.last_seen|ago }}</span></div>
+      <form class="inline auto" method="post" action="{{ url_for('door_open', door_id=d.id) }}">{{ csrf() }}<button class="btn sm">باز کن</button></form>
+    </div>
+    {% else %}
+    <p class="mut">هنوز دری تعریف نشده. از صفحه <a href="{{ url_for('doors') }}">درها</a> یک در اضافه کنید و کلید آن را در تنظیمات دستگاه وارد کنید.</p>
+    {% endfor %}
+  </div>
+
+  <div class="box">
+    <h2>افراد داخل</h2>
+    {% for c in inside %}
+    <div style="padding:3px 0"><a href="{{ url_for('card_edit', card_id=c.id) }}">{{ c.name }}</a> <span class="mut">از ساعت {{ c.last_ts|jtime }}</span></div>
+    {% else %}
+    <p class="mut">کسی داخل نیست.</p>
+    {% endfor %}
+  </div>
+
+  {% if unknown %}
+  <div class="box">
+    <h2>کارت‌های ثبت‌نشده (۷ روز اخیر)</h2>
+    <table>
+      {% for u in unknown %}
+      <tr><td class="mono">{{ u.uid }}</td><td class="mut">{{ u.n|fa }} بار · {{ u.ts|ago }}{% if u.door %} · {{ u.door }}{% endif %}</td>
+        <td class="end"><a class="btn sm" href="{{ url_for('card_new', uid=u.uid) }}">ثبت کارت</a></td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+<div class="box">
+  <div class="row"><h2>آخرین ترددها</h2><a class="auto" href="{{ url_for('events') }}">گزارش کامل ←</a></div>
+  {{ events_table(recent) }}
+</div>
+<script>setTimeout(()=>location.reload(), 15000)</script>
+{% endblock %}

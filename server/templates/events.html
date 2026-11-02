@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "_macros.html" import events_table %}
+{% block title %}گزارش تردد · کنترل تردد{% endblock %}
+{% block body %}
+<h1>گزارش تردد</h1>
+<form class="box row" method="get">
+  <div><label>جستجو</label><input name="q" value="{{ args.q or '' }}" placeholder="نام یا شناسه کارت"></div>
+  <div><label>نتیجه</label><select name="result"><option value="">همه</option>
+    {% for r in ['granted','unknown','disabled','expired','denied','manual'] %}<option value="{{ r }}" {{ 'selected' if args.result == r }}>{{ RESULT_FA[r] }}</option>{% endfor %}</select></div>
+  <div><label>در</label><select name="door"><option value="">همه</option>
+    {% for d in doors %}<option value="{{ d.id }}" {{ 'selected' if args.door == d.id|string }}>{{ d.name }}</option>{% endfor %}</select></div>
+  <div><label>از تاریخ</label><input name="from" dir="ltr" value="{{ args['from'] or '' }}" placeholder="1405/08/01"></div>
+  <div><label>تا تاریخ</label><input name="to" dir="ltr" value="{{ args.to or '' }}" placeholder="1405/08/30"></div>
+  <div class="auto"><button class="btn">فیلتر</button> <a class="btn sec" href="{{ url_for('events_csv', **args) }}">خروجی اکسل (CSV)</a></div>
+</form>
+<div class="box">
+  <p class="mut" style="margin-top:0">{{ total|fa }} رویداد</p>
+  {{ events_table(rows) }}
+  {% if pages > 1 %}
+  <div class="pager">
+    {% if page > 1 %}<a class="btn sec sm" href="{{ url_for('events', page=page-1, **args) }}">→ جدیدتر</a>{% endif %}
+    <span class="mut">صفحه {{ page|fa }} از {{ pages|fa }}</span>
+    {% if page < pages %}<a class="btn sec sm" href="{{ url_for('events', page=page+1, **args) }}">قدیمی‌تر ←</a>{% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

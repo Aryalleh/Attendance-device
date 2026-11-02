@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}درها · کنترل تردد{% endblock %}
+{% block body %}
+<h1>درها</h1>
+
+{% if new_key %}
+<div class="key">
+  <b>کلید دستگاه برای «{{ new_key.name }}»</b> — آن را در پنل دستگاه، بخش تنظیمات ← سرور وارد کنید. این کلید فقط یک بار نمایش داده می‌شود.
+  <code dir="ltr">{{ new_key.key }}</code>
+  آدرس سرور برای دستگاه: <span class="mono">{{ request.host_url.rstrip('/') }}</span>
+</div>
+{% endif %}
+
+<div class="box scroll">
+<table>
+<thead><tr><th>در</th><th>وضعیت</th><th>جهت</th><th>زمان باز ماندن</th><th>نسخه / IP</th><th></th></tr></thead>
+<tbody>
+{% for d in doors %}
+<tr>
+  <td><b>{{ d.name }}</b>{% if not d.enabled %} <span class="pill bad">غیرفعال</span>{% endif %}</td>
+  <td class="nowrap"><span class="dot {{ 'on' if d.last_seen and d.last_seen >= online_after else 'off' }}"></span>{{ d.last_seen|ago }}</td>
+  <td>{{ {'in':'فقط ورود','out':'فقط خروج','toggle':'ورود/خروج متناوب'}[d.direction] }}</td>
+  <td>{{ ('%.1f'|format(d.open_ms / 1000))|fa }} ثانیه</td>
+  <td class="mono mut">{{ d.fw or '—' }} · {{ d.last_ip or '—' }}</td>
+  <td class="nowrap end">
+    <form class="inline" method="post" action="{{ url_for('door_open', door_id=d.id) }}">{{ csrf() }}<button class="btn sm">باز کن</button></form>
+    <details style="display:inline-block;vertical-align:top"><summary class="btn sec sm">ویرایش</summary>
+      <div class="box popup">
+        <form method="post" action="{{ url_for('door_edit', door_id=d.id) }}">{{ csrf() }}
+          <label>نام</label><input name="name" value="{{ d.name }}" required>
+          <label>جهت</label>
+          <select name="direction">{% for v, l in [('toggle','ورود/خروج متناوب'),('in','فقط ورود'),('out','فقط خروج')] %}<option value="{{ v }}" {{ 'selected' if d.direction == v }}>{{ l }}</option>{% endfor %}</select>
+          <label>زمان باز ماندن قفل (میلی‌ثانیه)</label><input name="open_ms" type="number" dir="ltr" min="500" max="30000" value="{{ d.open_ms }}">
+          <label class="check"><input type="checkbox" name="enabled" value="1" {{ 'checked' if d.enabled }}> فعال (در غیرفعال همه کارت‌ها را رد می‌کند)</label>
+          <p><button class="btn">ذخیره</button></p>
+        </form>
+        <form class="inline" method="post" action="{{ url_for('door_rekey', door_id=d.id) }}" onsubmit="return confirm('کلید جدید ساخته شود؟ تا وارد کردن کلید جدید، دستگاه کار نمی‌کند.')">{{ csrf() }}<button class="btn sec sm">کلید جدید</button></form>
+        <form class="inline" method="post" action="{{ url_for('door_delete', door_id=d.id) }}" onsubmit="return confirm('این در حذف شود؟')">{{ csrf() }}<button class="btn red sm">حذف</button></form>
+      </div>
+    </details>
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="mut">هنوز دری تعریف نشده است.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+
+<div class="box">
+  <h2>افزودن در</h2>
+  <form method="post" action="{{ url_for('door_new') }}" class="row">
+    {{ csrf() }}
+    <div><label>نام</label><input name="name" placeholder="ورودی اصلی" required></div>
+    <div><label>جهت</label><select name="direction"><option value="toggle">ورود/خروج متناوب</option><option value="in">فقط ورود</option><option value="out">فقط خروج</option></select></div>
+    <div><label>زمان باز ماندن قفل (میلی‌ثانیه)</label><input name="open_ms" type="number" dir="ltr" min="500" max="30000" value="3000"></div>
+    <div class="auto"><button class="btn">افزودن</button></div>
+  </form>
+  <p class="mut">برای ثبت دقیق ورود و خروج از دو دستگاه استفاده کنید (یکی «فقط ورود» و یکی «فقط خروج»)، یا یک دستگاه در حالت «متناوب» که هر بار کارت‌زدن به ترتیب ورود ← خروج ثبت می‌شود.</p>
+</div>
+{% endblock %}
