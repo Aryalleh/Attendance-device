@@ -585,8 +585,12 @@ void setup() {
   SPI.begin();
   rfid.PCD_Init();
   readerOk = checkReader();
-  Serial.printf("[boot] reader %s, mode %s, %u cards\n", readerOk ? "OK" : "NOT FOUND",
-                S.mode.c_str(), activeCards().cards.size());
+  byte ver = rfid.PCD_ReadRegister(MFRC522::VersionReg);
+  Serial.printf("[boot] reader %s (version 0x%02X), mode %s, %u cards\n", readerOk ? "OK" : "NOT FOUND",
+                ver, S.mode.c_str(), activeCards().cards.size());
+  if (!readerOk)
+    Serial.println(ver == 0xFF ? "[rfid] 0xFF: MISO not connected/floating, or SDA(D8) not wired"
+                               : "[rfid] 0x00: RC522 unpowered (3.3V/GND), held in reset (RST->D0), or MISO shorted to GND");
 
   startNetwork();
   if (WiFi.status() == WL_CONNECTED) configTime(0, 0, S.ntpServer.c_str());
