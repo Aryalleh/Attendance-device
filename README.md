@@ -42,15 +42,19 @@ You switch modes in the device's own panel (Settings → Mode). No display is ne
 |---|---|---|---|---|
 | SDA (SS) | D8 | | Green LED | D1 |
 | SCK | D5 | | Red LED | D2 |
-| MOSI | D7 | | Buzzer | D0 |
+| MOSI | D7 | | Buzzer | D3 |
 | MISO | D6 | | Relay IN (lock) | D4 |
-| RST | D3 | | | |
+| RST | D0 | | | |
 | 3.3V | 3V3 | | | |
 | GND | G | | | |
 | IRQ | — | | | |
 
-D3/D4 must be HIGH and D8 LOW at boot. These assignments respect that, and an
-active-LOW relay on D4 stays **off** while the board boots. D4 is also the
+SCK/MISO/MOSI (D5/D6/D7) are the ESP8266's hardware SPI pins and can't be moved.
+D3/D4 must be HIGH and D8 LOW at boot. An active-LOW relay on D4 stays **off** while
+the board boots. For the buzzer on D3, a **low-level-trigger** module (set
+`BUZZER_ACTIVE_LOW true`) is best: it stays silent at boot. A high-level-trigger module
+will chirp briefly at power-on. If its input pulls D3 to GND, the board won't boot
+normally; it enters flash mode instead. D4 is also the
 Wemos's on-board LED, so that LED lights while the lock is open.
 
 Pins and active-high/low polarity are set in `firmware/src/config.h`.

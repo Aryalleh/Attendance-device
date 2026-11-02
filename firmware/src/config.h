@@ -3,16 +3,17 @@
 
 // ---------------------------------------------------------------------------
 // Wiring (Wemos D1 mini) — see README.md for the full table
-//   RC522  SDA(SS)->D8  SCK->D5  MOSI->D7  MISO->D6  RST->D3  3.3V  GND
-//   Green LED -> D1, Red LED -> D2, Buzzer -> D0, Relay/lock -> D4
-// D4 (GPIO2) and D3 (GPIO0) must be HIGH at boot, D8 (GPIO15) LOW: the
-// assignments below respect that (an active-LOW relay stays off at boot).
+//   RC522  SDA(SS)->D8  SCK->D5  MOSI->D7  MISO->D6  RST->D0  3.3V  GND
+//   Green LED -> D1, Red LED -> D2, Buzzer -> D3, Relay/lock -> D4
+// SCK/MISO/MOSI are the ESP8266 hardware SPI pins and can't be moved.
+// D4 (GPIO2) and D3 (GPIO0) must be HIGH at boot, D8 (GPIO15) LOW: an
+// active-LOW relay on D4 and a low-trigger buzzer on D3 both stay off at boot.
 // ---------------------------------------------------------------------------
 #define PIN_RC522_SS   D8
-#define PIN_RC522_RST  D3
+#define PIN_RC522_RST  D0
 #define PIN_LED_GREEN  D1
 #define PIN_LED_RED    D2
-#define PIN_BUZZER     D0
+#define PIN_BUZZER     D3
 #define PIN_RELAY      D4
 
 // Set to match your modules
