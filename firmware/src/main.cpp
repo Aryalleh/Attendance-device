@@ -521,10 +521,48 @@ void setupWeb() {
 
 // ---------------------------------------------------------------------------
 // network
+const char* wifiStatusText(wl_status_t st) {
+  switch (st) {
+    case WL_NO_SSID_AVAIL:   return "network not found (out of range, 5 GHz only, or SSID typo)";
+    case WL_CONNECT_FAILED:  return "connection failed";
+    case WL_WRONG_PASSWORD:  return "wrong password";
+    case WL_DISCONNECTED:    return "disconnected / still trying";
+    case WL_IDLE_STATUS:     return "idle";
+    case WL_CONNECTED:       return "connected";
+    default:                 return "unknown";
+  }
+}
+
+void logWifiFailure() {
+  Serial.printf("[wifi] could not join \"%s\": %s (status %d)\n", S.wifiSsid.c_str(),
+                wifiStatusText(WiFi.status()), WiFi.status());
+  int n = WiFi.scanNetworks();
+  bool seen = false;
+  for (int i = 0; i < n; i++) {
+    if (WiFi.SSID(i) == S.wifiSsid) {
+      seen = true;
+      Serial.printf("[wifi]   seen: channel %d, signal %d dBm, encryption %d\n",
+                    WiFi.channel(i), WiFi.RSSI(i), WiFi.encryptionType(i));
+    }
+  }
+  if (!seen) Serial.printf("[wifi]   \"%s\" not visible to the ESP8266 (%d networks found)\n", S.wifiSsid.c_str(), n);
+  WiFi.scanDelete();
+}
+
 String setupApName() { return "RFID-Setup-" + String(ESP.getChipId(), HEX); }
+
+WiFiEventHandler onDisconnect, onGotIp;
 
 void startNetwork() {
   WiFi.persistent(false);
+  onDisconnect = WiFi.onStationModeDisconnected([](const WiFiEventStationModeDisconnected& e) {
+    static uint8_t lastReason = 0;
+    if (e.reason != lastReason) Serial.printf("[wifi] router disconnect reason %d\n", e.reason);
+    lastReason = e.reason;
+  });
+  onGotIp = WiFi.onStationModeGotIP([](const WiFiEventStationModeGotIP& e) {
+    Serial.printf("[wifi] got IP %s\n", e.ip.toString().c_str());
+  });
   WiFi.hostname(S.deviceName);
 
   if (!S.isServerMode() && S.apOnly) {
@@ -537,6 +575,10 @@ void startNetwork() {
 
   if (S.wifiSsid.length()) {
     WiFi.mode(WIFI_STA);
+    // 802.11g: some routers (seen with Vodafone/FRITZ!Box) never answer the ESP8266's
+    // 802.11n association (disconnect reason 2, AUTH_EXPIRE). The device only sends tiny
+    // requests, so g-mode costs nothing.
+    WiFi.setPhyMode(WIFI_PHY_MODE_11G);
     WiFi.setAutoReconnect(true);
     WiFi.begin(S.wifiSsid.c_str(), S.wifiPass.c_str());
     uint32_t t0 = millis();
@@ -552,6 +594,8 @@ void startNetwork() {
       return;
     }
   }
+
+  if (S.wifiSsid.length()) logWifiFailure();
 
   // Not configured or router unreachable: open a setup AP. The device still
   // works as a reader meanwhile, and keeps retrying the router in background.
@@ -616,6 +660,12 @@ void loop() {
     network = "وای‌فای «" + S.wifiSsid + "»";
     configTime(0, 0, S.ntpServer.c_str());
     Serial.printf("[wifi] connected, IP %s\n", WiFi.localIP().toString().c_str());
+  }
+
+  static uint32_t lastWifiLogMs = 0;
+  if (setupAp && S.wifiSsid.length() && ms - lastWifiLogMs >= 30000) {
+    lastWifiLogMs = ms;
+    Serial.printf("[wifi] still trying \"%s\": %s\n", S.wifiSsid.c_str(), wifiStatusText(WiFi.status()));
   }
 
   if (ms - lastPollMs >= 50) {
