@@ -11,6 +11,7 @@ Environment:
 """
 import csv
 import functools
+import hashlib
 import getpass
 import io
 import json
@@ -25,6 +26,7 @@ from datetime import date, datetime, timedelta
 
 from flask import (Flask, Response, abort, current_app, flash, g, jsonify,
                    redirect, render_template, request, session, url_for)
+from itsdangerous import BadSignature, URLSafeSerializer
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import db as store
@@ -138,6 +140,55 @@ def csrf_protect():
     if request.method == "POST" and not request.path.startswith("/api/"):
         if request.form.get("csrf") != session.get("csrf"):
             abort(400, "نشست منقضی شده است — صفحه را دوباره بارگذاری کنید.")
+
+
+# --- live screen helpers ---------------------------------------------------
+
+def _kiosk_serializer():
+    return URLSafeSerializer(current_app.secret_key, salt="kiosk")
+
+
+def _key_tag(dev):
+    return hashlib.sha256(dev["key"].encode()).hexdigest()[:12]
+
+
+def kiosk_token(dev):
+    """Login-free link to one door's live screen. Changing the door key revokes it."""
+    return _kiosk_serializer().dumps({"d": dev["id"], "k": _key_tag(dev)})
+
+
+def kiosk_door(token):
+    try:
+        data = _kiosk_serializer().loads(token)
+    except BadSignature:
+        abort(404)
+    dev = get_db().execute("SELECT * FROM devices WHERE id = ?", (data.get("d"),)).fetchone()
+    if dev is None or data.get("k") != _key_tag(dev):
+        abort(404)
+    return dev
+
+
+def live_events(door_id):
+    """New scans for the live screen. ?init=1 -> the latest few; ?after=<id> -> newer ones."""
+    db = get_db()
+    where, params = "e.offline = 0", []
+    if door_id:
+        where += " AND e.device_id = ?"
+        params.append(door_id)
+    if request.args.get("init"):
+        rows = db.execute(EVENT_SELECT + f"WHERE {where} ORDER BY e.id DESC LIMIT 8", params).fetchall()[::-1]
+    else:
+        rows = db.execute(EVENT_SELECT + f"WHERE {where} AND e.id > ? ORDER BY e.id LIMIT 20",
+                          params + [request.args.get("after", 0, type=int)]).fetchall()
+    cutoff = now() - ONLINE_WINDOW
+    doors = db.execute("SELECT id, name, last_seen FROM devices ORDER BY name").fetchall()
+    return jsonify(
+        events=[{"id": r["id"], "name": r["name"], "uid": r["uid"], "result": r["result"],
+                 "direction": r["direction"], "door": r["door"] or "",
+                 "time": fmt_jtime(r["ts"], True), "date": fmt_jdate(r["ts"])} for r in rows],
+        doors=[{"id": d["id"], "name": d["name"],
+                "online": bool(d["last_seen"] and d["last_seen"] >= cutoff)}
+               for d in doors if not door_id or d["id"] == door_id])
 
 
 def login_required(view):
@@ -338,7 +389,7 @@ def register_routes(app):
                 session.permanent = True
                 session["user"] = u["username"]
                 nxt = request.args.get("next", "")
-                return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else url_for("dashboard"))
+                return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else url_for("live"))
             time.sleep(1)
             flash("نام کاربری یا رمز عبور اشتباه است.", "error")
         return render_template("login.html")
@@ -350,7 +401,35 @@ def register_routes(app):
 
     # ---- dashboard ----
 
+    # ---- live door screen (landing page) ----
+
     @app.get("/")
+    @login_required
+    def live():
+        doors = get_db().execute("SELECT id, name FROM devices ORDER BY name").fetchall()
+        door_id = request.args.get("door", 0, type=int)
+        return render_template("live.html", kiosk=False, doors=doors, door_id=door_id,
+                               feed_url=url_for("live_feed", door=door_id or None))
+
+    @app.get("/live/feed")
+    def live_feed():
+        if not session.get("user"):
+            return jsonify(error="login required"), 401
+        return live_events(request.args.get("door", 0, type=int))
+
+    @app.get("/kiosk/<token>")
+    def kiosk(token):
+        dev = kiosk_door(token)
+        return render_template("live.html", kiosk=True, doors=[dev], door_id=dev["id"],
+                               feed_url=url_for("kiosk_feed", token=token))
+
+    @app.get("/kiosk/<token>/feed")
+    def kiosk_feed(token):
+        return live_events(kiosk_door(token)["id"])
+
+    # ---- dashboard ----
+
+    @app.get("/dashboard")
     @login_required
     def dashboard():
         db = get_db()
@@ -474,7 +553,8 @@ def register_routes(app):
     def doors():
         rows = get_db().execute("SELECT * FROM devices ORDER BY name").fetchall()
         return render_template("doors.html", doors=rows, online_after=now() - ONLINE_WINDOW,
-                               new_key=session.pop("new_key", None))
+                               new_key=session.pop("new_key", None),
+                               kiosk_links={d["id"]: url_for("kiosk", token=kiosk_token(d)) for d in rows})
 
     def door_form_values():
         f = request.form

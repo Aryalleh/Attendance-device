@@ -12,7 +12,7 @@
 <header><div class="in">
   <span class="brand">🔑 کنترل تردد</span>
   <nav>
-    {% for ep, label in [('dashboard','داشبورد'),('cards','کارت‌ها'),('doors','درها'),('events','گزارش تردد'),('attendance','حضور و غیاب'),('settings','تنظیمات')] %}
+    {% for ep, label in [('live','نمایشگر'),('dashboard','داشبورد'),('cards','کارت‌ها'),('doors','درها'),('events','گزارش تردد'),('attendance','حضور و غیاب'),('settings','تنظیمات')] %}
     <a href="{{ url_for(ep) }}" class="{{ 'on' if request.endpoint == ep or (ep == 'cards' and request.endpoint in ('card_new','card_edit')) }}">{{ label }}</a>
     {% endfor %}
   </nav>

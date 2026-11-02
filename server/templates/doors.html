@@ -25,6 +25,7 @@
   <td class="mono mut">{{ d.fw or '—' }} · {{ d.last_ip or '—' }}</td>
   <td class="nowrap end">
     <form class="inline" method="post" action="{{ url_for('door_open', door_id=d.id) }}">{{ csrf() }}<button class="btn sm">باز کن</button></form>
+    <a class="btn sec sm" href="{{ kiosk_links[d.id] }}" target="_blank" title="لینک نمایشگر این در برای تبلت/مانیتور کنار در — بدون نیاز به ورود. با «کلید جدید» باطل می‌شود.">نمایشگر</a>
     <details style="display:inline-block;vertical-align:top"><summary class="btn sec sm">ویرایش</summary>
       <div class="box popup">
         <form method="post" action="{{ url_for('door_edit', door_id=d.id) }}">{{ csrf() }}
@@ -57,6 +58,7 @@
     <div><label>زمان باز ماندن قفل (میلی‌ثانیه)</label><input name="open_ms" type="number" dir="ltr" min="500" max="30000" value="3000"></div>
     <div class="auto"><button class="btn">افزودن</button></div>
   </form>
+  <p class="mut">دکمه «نمایشگر» یک لینک اختصاصی برای تبلت یا مانیتور کنار همان در باز می‌کند که بدون ورود به پنل، نام فرد و نتیجه را با صدا نشان می‌دهد. هر کس این لینک را داشته باشد ترددهای آن در را می‌بیند؛ با «کلید جدید» باطل می‌شود.</p>
   <p class="mut">برای ثبت دقیق ورود و خروج از دو دستگاه استفاده کنید (یکی «فقط ورود» و یکی «فقط خروج»)، یا یک دستگاه در حالت «متناوب» که هر بار کارت‌زدن به ترتیب ورود ← خروج ثبت می‌شود.</p>
 </div>
 {% endblock %}

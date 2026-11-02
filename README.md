@@ -153,7 +153,13 @@ Vazirmatn font (`static/fonts`, SIL OFL), so it doesn't need internet. The devic
 the system font (Tahoma/Segoe UI).
 
 
-- **Dashboard**: who is inside, today's counts, door online/offline status with an *Open* button, unregistered cards, recent activity.
+- **Live screen** (landing page, `/`): a full-screen display for a tablet or monitor by the door. It shows the
+  person's name with a green ✓ «خوش آمدید / خدانگهدار», or a red ✗ «دسترسی رد شد» with the reason (unknown card,
+  blocked or expired). Each scan plays a sound through the browser (Web Audio, no audio files needed). It also shows
+  a clock in Shamsi date and the last 10 scans. Tap the screen once so the browser allows sound, and use the ⛶ button
+  for full screen. **Doors → نمایشگر** gives each door a private link that works without logging in.
+  Anyone with the link can see that door's scans, and **New key** revokes it.
+- **Dashboard** (`/dashboard`): who is inside, today's counts, door online/offline status with an *Open* button, unregistered cards, recent activity.
 - **Cards**: add, edit, block or allow; optional **valid-until** date and a note; per-card history.
 - **Doors**: direction (entry, exit or toggle), unlock time, enable/disable, new key.
 - **Log**: filter by name, UID, result, door and date; CSV export.
