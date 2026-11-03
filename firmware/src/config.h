@@ -28,6 +28,7 @@
 #define QUEUE_MAX_BYTES    4096    // offline events waiting to be uploaded (server mode)
 #define SCAN_REPEAT_MS     2000    // ignore the same card held on the reader for this long
 #define SERVER_TIMEOUT_MS  1500    // after this, fall back to the cached card list
+#define SERVER_TIMEOUT_TLS_MS 4000 // same for https:// servers (Cloudflare Workers): TLS is slower
 #define SYNC_INTERVAL_MS   5000    // heartbeat to server (remote-open latency)
 #define READER_CHECK_MS    30000   // RC522 health check / re-init
 #define WIFI_CONNECT_MS    15000   // at boot; after that the setup AP is opened

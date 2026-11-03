@@ -9,6 +9,8 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266HTTPClient.h>
+#include <WiFiClientSecureBearSSL.h>
+#include <memory>
 #include <ESP8266mDNS.h>
 #include <LittleFS.h>
 #include <SPI.h>
@@ -70,12 +72,30 @@ void setLast(const String& uid, const String& name, const char* result) {
 
 // ---------------------------------------------------------------------------
 // server communication
+//
+// serverUrl may be http:// (Flask server on the LAN) or https:// (Cloudflare
+// Worker, which is HTTPS-only). For https the connection is encrypted but the
+// certificate is NOT verified (setInsecure): the ESP8266 has no CA store and
+// Cloudflare rotates certificates. Someone who can intercept the device's
+// traffic could impersonate the server and read the device key.
+BearSSL::Session tlsSession;   // reused so later requests skip the slow full handshake
+
+bool serverIsHttps() { return S.serverUrl.startsWith("https://"); }
+
+std::unique_ptr<WiFiClient> serverClient() {
+  if (!serverIsHttps()) return std::unique_ptr<WiFiClient>(new WiFiClient());
+  auto* c = new BearSSL::WiFiClientSecure();
+  c->setInsecure();
+  c->setSession(&tlsSession);
+  return std::unique_ptr<WiFiClient>(c);
+}
+
 int postJson(const char* path, JsonDocument& req, JsonDocument& resp) {
   if (WiFi.status() != WL_CONNECTED || S.serverUrl.isEmpty()) return -1;
-  WiFiClient client;
+  auto client = serverClient();
   HTTPClient http;
-  http.setTimeout(SERVER_TIMEOUT_MS);
-  if (!http.begin(client, S.serverUrl + path)) return -1;
+  http.setTimeout(serverIsHttps() ? SERVER_TIMEOUT_TLS_MS : SERVER_TIMEOUT_MS);
+  if (!http.begin(*client, S.serverUrl + path)) return -1;
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Device-Key", S.deviceKey);
   String body;
@@ -90,10 +110,10 @@ int postJson(const char* path, JsonDocument& req, JsonDocument& resp) {
 }
 
 void fetchCards(const String& version) {
-  WiFiClient client;
+  auto client = serverClient();
   HTTPClient http;
-  http.setTimeout(4000);
-  if (!http.begin(client, S.serverUrl + "/api/v1/cards")) return;
+  http.setTimeout(serverIsHttps() ? 8000 : 4000);
+  if (!http.begin(*client, S.serverUrl + "/api/v1/cards")) return;
   http.addHeader("X-Device-Key", S.deviceKey);
   int code = http.GET();
   if (code != 200) { http.end(); return; }

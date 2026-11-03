@@ -56,7 +56,7 @@ label{display:block;margin:8px 0 3px;color:var(--mut);font-size:13px}.row{displa
   <label>سرور زمان NTP (نیاز به اینترنت)</label><input id="s-ntpServer" dir="ltr">
  </div>
  <div class="box" id="srvBox"><h2>سرور</h2>
-  <div class="row"><div><label>آدرس سرور</label><input id="s-serverUrl" dir="ltr" placeholder="http://192.168.1.10:8080"></div><div><label>کلید دستگاه (از صفحه «درها» در پنل سرور)</label><input id="s-deviceKey" type="password" dir="ltr" placeholder="بدون تغییر"></div></div>
+  <div class="row"><div><label>آدرس سرور</label><input id="s-serverUrl" dir="ltr" placeholder="http://192.168.1.10:8080 / https://….workers.dev"></div><div><label>کلید دستگاه (از صفحه «درها» در پنل سرور)</label><input id="s-deviceKey" type="password" dir="ltr" placeholder="بدون تغییر"></div></div>
   <label class="chk"><input type="checkbox" id="s-offlineFallback"> اگر سرور در دسترس نبود، از فهرست ذخیره‌شده کارت‌ها استفاده شود</label>
  </div>
  <div class="box"><h2>ورود به پنل</h2>
