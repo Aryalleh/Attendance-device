@@ -1,0 +1,114 @@
+{
+ "A1": {
+  "angle": 0.0,
+  "dx": 10.945,
+  "dy": 27.246,
+  "flipped": false,
+  "pinned": false,
+  "visible": true
+ },
+ "BZ1": {
+  "angle": 180.0,
+  "dx": 3.8,
+  "dy": 7.256,
+  "flipped": false,
+  "pinned": false,
+  "visible": true
+ },
+ "C1": {
+  "angle": 0.0,
+  "dx": 2.5,
+  "dy": -2.506,
+  "flipped": false,
+  "pinned": false,
+  "visible": true
+ },
+ "C2": {
+  "angle": 0.0,
+  "dx": 0.955,
+  "dy": -3.756,
+  "flipped": false,
+  "pinned": false,
+  "visible": true
+ },
+ "D1": {
+  "angle": 180.0,
+  "dx": -3.141,
+  "dy": 0.0,
+  "flipped": false,
+  "pinned": false,
+  "visible": true
+ },
+ "D2": {
+  "angle": 180.0,
+  "dx": 1.275,
+  "dy": -4.216,
+  "flipped": false,
+  "pinned": false,
+  "visible": true
+ },
+ "J1": {
+  "angle": 180.0,
+  "dx": 0.0,
+  "dy": 20.556,
+  "flipped": false,
+  "pinned": false,
+  "visible": true
+ },
+ "J2": {
+  "angle": 0.0,
+  "dx": 0.0,
+  "dy": -2.776,
+  "flipped": false,
+  "pinned": false,
+  "visible": true
+ },
+ "Q1": {
+  "angle": 270.0,
+  "dx": -2.466,
+  "dy": -0.36,
+  "flipped": false,
+  "pinned": false,
+  "visible": true
+ },
+ "Q2": {
+  "angle": 270.0,
+  "dx": 5.006,
+  "dy": -0.36,
+  "flipped": false,
+  "pinned": false,
+  "visible": true
+ },
+ "R1": {
+  "angle": 0.0,
+  "dx": 3.81,
+  "dy": -2.506,
+  "flipped": false,
+  "pinned": false,
+  "visible": true
+ },
+ "R2": {
+  "angle": 0.0,
+  "dx": 3.81,
+  "dy": -2.506,
+  "flipped": false,
+  "pinned": false,
+  "visible": true
+ },
+ "R3": {
+  "angle": 0.0,
+  "dx": 3.81,
+  "dy": -2.506,
+  "flipped": false,
+  "pinned": false,
+  "visible": true
+ },
+ "R4": {
+  "angle": 270.0,
+  "dx": 9.676,
+  "dy": -0.0,
+  "flipped": false,
+  "pinned": false,
+  "visible": true
+ }
+}

@@ -524,7 +524,8 @@ class Board:
                 if os.path.exists(t):
                     tables.append(t)
 
-        roots = [r"C:\Program Files\KiCad\10.0\share\kicad",
+        roots = [os.path.dirname(os.environ["KICAD10_FOOTPRINT_DIR"])] if os.environ.get("KICAD10_FOOTPRINT_DIR") else []
+        roots += [r"C:\Program Files\KiCad\10.0\share\kicad",
                  r"C:\Program Files\KiCad\9.0\share\kicad",
                  "/usr/share/kicad",
                  "/Applications/KiCad/KiCad.app/Contents/SharedSupport"]

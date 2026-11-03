@@ -34,7 +34,7 @@
 |---|---|
 | `firmware/` | نرم‌افزار Wemos (C++، PlatformIO) |
 | `server/` | سرور و پنل وب (Python، Flask، SQLite) |
-| `hardware/` | اسکریپت تولید شماتیک KiCad برای بُرد حامل |
+| `hardware/` | بُرد مدار چاپی حامل (KiCad 10): شماتیک، طرح دولایه، Gerber و تصاویر |
 | `docs/` | راهنمای مونتاژ (فارسی/انگلیسی) و پروپوزال |
 | `cloudflare/` | اختیاری: همین سرور روی Cloudflare Workers ([راهنمای آن](cloudflare/README.md)) |
 
@@ -52,6 +52,29 @@
 | بازر | ماژول بازر «تحریک با سطح پایین» (Low-level trigger)، یا بازر فعال ۵ ولت با مدار دو ترانزیستوری راهنمای مونتاژ |
 | کابل USB (دیتادار) + آداپتور ۵ ولت | حداقل ۵۰۰ میلی‌آمپر |
 | *اختیاری:* ماژول رله + قفل برقی | تغذیهٔ جداگانه برای قفل لازم است؛ [توضیح رله](#رله-و-قفل-اختیاری) را ببینید |
+
+### بُرد مدار چاپی (اختیاری)
+
+طرح KiCad در پوشهٔ [`hardware/`](hardware/README.md) است: بُرد دولایه، ۸۵ × ۴۰ میلی‌متر و تمام قطعات
+از نوع پایه‌دار (THT). Wemos D1 mini و RC522 روی سوکت قرار می‌گیرند و LEDها، مدار راه‌انداز بازر
+(گزینهٔ ب راهنمای مونتاژ) و یک هدر سه‌پین برای ماژول رلهٔ اختیاری روی خود بُرد هستند.
+فایل‌های ساخت (Gerber): [`hardware/fab/rfid-door-controller-gerbers.zip`](hardware/fab/rfid-door-controller-gerbers.zip).
+
+| نمای سه‌بعدی از بالا | نمای سه‌بعدی |
+|---|---|
+| ![PCB top](hardware/render/pcb_top.png) | ![PCB angled](hardware/render/pcb_angled.png) |
+
+مسیرکشی (قرمز = مس رو، آبی = مس پشت؛ هر دو لایه با سطح زمین پر شده‌اند):
+
+![PCB routing](hardware/render/pcb_routing.png)
+
+| مس لایهٔ رو | مس لایهٔ پشت (از زیر) |
+|---|---|
+| ![top copper](hardware/render/pcb_copper_top.png) | ![bottom copper](hardware/render/pcb_copper_bottom.png) |
+
+شماتیک ([PDF](hardware/rfid-door-controller-schematic.pdf)):
+
+![schematic](hardware/render/schematic.png)
 
 ### سیم‌کشی
 

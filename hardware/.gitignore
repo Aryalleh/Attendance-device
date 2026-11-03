@@ -1,0 +1,12 @@
+# KiCad local state and backups
+*.kicad_prl
+*-backups/
+.schgen-backup/
+.pcbgen-backup/
+~*.lck
+#auto_saved_files#
+_autosave-*
+
+# script work files
+routing/
+__pycache__/

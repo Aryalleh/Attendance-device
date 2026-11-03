@@ -35,7 +35,7 @@ You switch modes in the device's own panel (Settings → Mode). No display is ne
 |---|---|
 | `firmware/` | Wemos firmware (C++, PlatformIO) |
 | `server/` | Server and web panel (Python, Flask, SQLite) |
-| `hardware/` | KiCad schematic generator for the carrier board |
+| `hardware/` | Carrier PCB (KiCad 10): schematic, 2-layer layout, gerbers, renders |
 | `docs/` | Assembly guide (EN/FA) and project proposal |
 | `cloudflare/` | Optional: the same server on Cloudflare Workers ([its README](cloudflare/README.md)) |
 
@@ -55,6 +55,29 @@ regulator makes 3.3 V for the RC522. Full step-by-step instructions are in the
 | Buzzer | a low-level-trigger buzzer module, or a 5 V active buzzer with the 2-transistor driver from the assembly guide |
 | USB cable (data-capable) + 5 V USB adapter | ≥ 500 mA |
 | *Optional:* relay module + electric lock | needs its own lock supply; see the [relay note](#optional-relay-and-lock) |
+
+### Carrier PCB (optional)
+
+The KiCad design is in [`hardware/`](hardware/README.md): a 2-layer, 85 × 40 mm, all through-hole
+board. The D1 mini and the RC522 plug into sockets, and the board carries the LEDs, the buzzer driver
+(option B in the assembly guide) and a 3-pin header for an optional relay module. Gerbers:
+[`hardware/fab/rfid-door-controller-gerbers.zip`](hardware/fab/rfid-door-controller-gerbers.zip).
+
+| 3D, top | 3D |
+|---|---|
+| ![PCB top](hardware/render/pcb_top.png) | ![PCB angled](hardware/render/pcb_angled.png) |
+
+Routing (red = top copper, blue = bottom copper, both with a ground pour):
+
+![PCB routing](hardware/render/pcb_routing.png)
+
+| Top copper | Bottom copper (seen from below) |
+|---|---|
+| ![top copper](hardware/render/pcb_copper_top.png) | ![bottom copper](hardware/render/pcb_copper_bottom.png) |
+
+Schematic ([PDF](hardware/rfid-door-controller-schematic.pdf)):
+
+![schematic](hardware/render/schematic.png)
 
 ### Wiring
 

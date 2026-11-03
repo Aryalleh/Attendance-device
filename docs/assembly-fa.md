@@ -86,6 +86,31 @@
 | ورودی بازر | Wemos **D3** | [بخش ۵-۴](#۵-۴-بازر) را ببینید |
 | همهٔ GNDها | Wemos **G** | زمین مشترک |
 
+### ۳-۱. بُرد مدار چاپی (اختیاری)
+
+به‌جای بُرد سوراخ‌دار و سیم‌کشی می‌توانید بُرد مدار چاپی پروژه را سفارش دهید. همهٔ اتصالات جدول بالا روی آن انجام شده، از گزینهٔ ب بازر استفاده می‌کند و فقط لحیم کردن قطعات لازم است ([`hardware/README.md`](../hardware/README.md)).
+
+طرح KiCad در پوشهٔ [`hardware/`](../hardware/README.md) است: بُرد دولایه، ۸۵ × ۴۰ میلی‌متر و تمام قطعات
+از نوع پایه‌دار (THT). Wemos D1 mini و RC522 روی سوکت قرار می‌گیرند و LEDها، مدار راه‌انداز بازر
+(گزینهٔ ب راهنمای مونتاژ) و یک هدر سه‌پین برای ماژول رلهٔ اختیاری روی خود بُرد هستند.
+فایل‌های ساخت (Gerber): [`hardware/fab/rfid-door-controller-gerbers.zip`](../hardware/fab/rfid-door-controller-gerbers.zip).
+
+| نمای سه‌بعدی از بالا | نمای سه‌بعدی |
+|---|---|
+| ![PCB top](../hardware/render/pcb_top.png) | ![PCB angled](../hardware/render/pcb_angled.png) |
+
+مسیرکشی (قرمز = مس رو، آبی = مس پشت؛ هر دو لایه با سطح زمین پر شده‌اند):
+
+![PCB routing](../hardware/render/pcb_routing.png)
+
+| مس لایهٔ رو | مس لایهٔ پشت (از زیر) |
+|---|---|
+| ![top copper](../hardware/render/pcb_copper_top.png) | ![bottom copper](../hardware/render/pcb_copper_bottom.png) |
+
+شماتیک ([PDF](../hardware/rfid-door-controller-schematic.pdf)):
+
+![schematic](../hardware/render/schematic.png)
+
 ---
 
 ## ۴. اول Firmware را آپلود کنید

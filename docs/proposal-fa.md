@@ -133,6 +133,29 @@
 | چشمک آهستهٔ قرمز | Wi-Fi راه‌اندازی دستگاه فعال است |
 | سه بار LED قرمز بدون صدا در زمان روشن شدن | RC522 پیدا نشد؛ سیم‌کشی را بررسی کنید |
 
+### ۵-۶. بُرد مدار چاپی
+
+طرح KiCad در پوشهٔ [`hardware/`](../hardware/README.md) است: بُرد دولایه، ۸۵ × ۴۰ میلی‌متر و تمام قطعات
+از نوع پایه‌دار (THT). Wemos D1 mini و RC522 روی سوکت قرار می‌گیرند و LEDها، مدار راه‌انداز بازر
+(گزینهٔ ب راهنمای مونتاژ) و یک هدر سه‌پین برای ماژول رلهٔ اختیاری روی خود بُرد هستند.
+فایل‌های ساخت (Gerber): [`hardware/fab/rfid-door-controller-gerbers.zip`](../hardware/fab/rfid-door-controller-gerbers.zip).
+
+| نمای سه‌بعدی از بالا | نمای سه‌بعدی |
+|---|---|
+| ![PCB top](../hardware/render/pcb_top.png) | ![PCB angled](../hardware/render/pcb_angled.png) |
+
+مسیرکشی (قرمز = مس رو، آبی = مس پشت؛ هر دو لایه با سطح زمین پر شده‌اند):
+
+![PCB routing](../hardware/render/pcb_routing.png)
+
+| مس لایهٔ رو | مس لایهٔ پشت (از زیر) |
+|---|---|
+| ![top copper](../hardware/render/pcb_copper_top.png) | ![bottom copper](../hardware/render/pcb_copper_bottom.png) |
+
+شماتیک ([PDF](../hardware/rfid-door-controller-schematic.pdf)):
+
+![schematic](../hardware/render/schematic.png)
+
 ---
 
 ## ۶. نرم‌افزار دستگاه (Firmware)
@@ -502,7 +525,7 @@ def csrf_protect():
 card-reader/
 ├── firmware/      نرم‌افزار دستگاه (C++، PlatformIO)
 ├── server/        سرور Flask + SQLite + قالب‌های پنل
-├── hardware/      اسکریپت تولید شماتیک KiCad
+├── hardware/      شماتیک و بُرد مدار چاپی KiCad (Gerber و تصاویر)
 └── docs/          مستندات (همین پروپوزال)
 ```
 

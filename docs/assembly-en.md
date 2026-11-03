@@ -89,6 +89,31 @@ plain buzzer straight to D3.
 | Buzzer input | Wemos **D3** | see [5.4](#54-buzzer) |
 | All GND | Wemos **G** | common ground |
 
+### 3.1 Carrier PCB (optional)
+
+Instead of perfboard and wires you can order the project's PCB. It makes every connection in the table above, uses buzzer option B, and only needs the parts soldered on (see [`hardware/README.md`](../hardware/README.md)).
+
+The KiCad design is in [`hardware/`](../hardware/README.md): a 2-layer, 85 × 40 mm, all through-hole
+board. The D1 mini and the RC522 plug into sockets, and the board carries the LEDs, the buzzer driver
+(option B in the assembly guide) and a 3-pin header for an optional relay module. Gerbers:
+[`hardware/fab/rfid-door-controller-gerbers.zip`](../hardware/fab/rfid-door-controller-gerbers.zip).
+
+| 3D, top | 3D |
+|---|---|
+| ![PCB top](../hardware/render/pcb_top.png) | ![PCB angled](../hardware/render/pcb_angled.png) |
+
+Routing (red = top copper, blue = bottom copper, both with a ground pour):
+
+![PCB routing](../hardware/render/pcb_routing.png)
+
+| Top copper | Bottom copper (seen from below) |
+|---|---|
+| ![top copper](../hardware/render/pcb_copper_top.png) | ![bottom copper](../hardware/render/pcb_copper_bottom.png) |
+
+Schematic ([PDF](../hardware/rfid-door-controller-schematic.pdf)):
+
+![schematic](../hardware/render/schematic.png)
+
 ---
 
 ## 4. Flash the firmware first
