@@ -16,6 +16,8 @@ struct Settings {
   String adminPass = "admin";
   String serverUrl;                // e.g. http://192.168.1.10:8080
   String deviceKey;                // copied from the server panel (Doors page)
+  String serverUrl2;               // optional failover server, used while serverUrl is unreachable
+  String deviceKey2;               // key on the failover server; empty = same as deviceKey
   bool   offlineFallback = true;   // server mode: use cached card list if the server is down
   String direction = "toggle";     // standalone: "in" | "out" | "toggle"
   uint32_t openMs = 3000;          // standalone: how long the lock stays open
@@ -53,6 +55,7 @@ struct Settings {
     o["apOnly"] = apOnly;
     o["adminUser"] = adminUser;
     o["serverUrl"] = serverUrl;
+    o["serverUrl2"] = serverUrl2;
     o["offlineFallback"] = offlineFallback;
     o["direction"] = direction;
     o["openMs"] = openMs;
@@ -62,8 +65,10 @@ struct Settings {
       o["apPass"] = apPass;
       o["adminPass"] = adminPass;
       o["deviceKey"] = deviceKey;
+      o["deviceKey2"] = deviceKey2;
     } else {
       o["hasDeviceKey"] = deviceKey.length() > 0;
+      o["hasDeviceKey2"] = deviceKey2.length() > 0;
     }
   }
 
@@ -86,6 +91,8 @@ struct Settings {
     str("adminPass", adminPass, true);
     str("serverUrl", serverUrl);
     str("deviceKey", deviceKey, true);
+    str("serverUrl2", serverUrl2);
+    str("deviceKey2", deviceKey2, true);
     str("direction", direction);
     str("ntpServer", ntpServer);
     if (o["apOnly"].is<bool>()) apOnly = o["apOnly"];
@@ -100,5 +107,6 @@ struct Settings {
     if (deviceName.length() == 0) deviceName = "door-1";
     openMs = constrain(openMs, (uint32_t)500, (uint32_t)30000);
     while (serverUrl.endsWith("/")) serverUrl.remove(serverUrl.length() - 1);
+    while (serverUrl2.endsWith("/")) serverUrl2.remove(serverUrl2.length() - 1);
   }
 };

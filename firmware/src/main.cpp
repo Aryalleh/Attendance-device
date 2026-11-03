@@ -41,6 +41,7 @@ bool readerOk = false;
 String cacheVersion;
 String network;
 uint32_t lastSyncMs = 0, lastReaderCheckMs = 0, lastPollMs = 0;
+uint32_t lastNetOkMs = 0;   // last successful reply from the server (Wi-Fi link watchdog)
 uint32_t rebootAtMs = 0, cardsDirtySinceMs = 0;
 
 String lastUid, lastName, lastResult;
@@ -80,7 +81,29 @@ void setLast(const String& uid, const String& name, const char* result) {
 // traffic could impersonate the server and read the device key.
 BearSSL::Session tlsSession;   // reused so later requests skip the slow full handshake
 
-bool serverIsHttps() { return S.serverUrl.startsWith("https://"); }
+// Failover: requests go to serverUrl; after a request gets no HTTP reply at all
+// they go to serverUrl2 (if set), and the primary is retried every few minutes.
+bool useBackup = false;
+uint32_t backupSinceMs = 0;
+
+bool hasBackup() { return S.serverUrl2.length() > 0; }
+const String& activeUrl() { return useBackup && hasBackup() ? S.serverUrl2 : S.serverUrl; }
+const String& activeKey() { return useBackup && hasBackup() && S.deviceKey2.length() ? S.deviceKey2 : S.deviceKey; }
+
+void switchServer(bool backup, const char* why) {
+  if (useBackup == backup) return;
+  useBackup = backup;
+  backupSinceMs = millis();
+  Serial.printf("[sync] %s: now using %s server %s\n", why, backup ? "failover" : "primary", activeUrl().c_str());
+}
+
+// called after every request: no reply at all means "unreachable"
+void noteServerResult(int code) {
+  if (code > 0 || !hasBackup()) return;
+  switchServer(!useBackup, useBackup ? "failover server unreachable" : "primary server unreachable");
+}
+
+bool serverIsHttps() { return activeUrl().startsWith("https://"); }
 
 std::unique_ptr<WiFiClient> serverClient() {
   if (!serverIsHttps()) return std::unique_ptr<WiFiClient>(new WiFiClient());
@@ -95,12 +118,14 @@ int postJson(const char* path, JsonDocument& req, JsonDocument& resp) {
   auto client = serverClient();
   HTTPClient http;
   http.setTimeout(serverIsHttps() ? SERVER_TIMEOUT_TLS_MS : SERVER_TIMEOUT_MS);
-  if (!http.begin(*client, S.serverUrl + path)) return -1;
+  if (!http.begin(*client, activeUrl() + path)) return -1;
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("X-Device-Key", S.deviceKey);
+  http.addHeader("X-Device-Key", activeKey());
   String body;
   serializeJson(req, body);
   int code = http.POST(body);
+  if (code > 0) lastNetOkMs = millis();   // any HTTP reply proves the link works
+  noteServerResult(code);
   if (code == 200) {
     String r = http.getString();
     if (deserializeJson(resp, r)) code = -2;
@@ -113,8 +138,8 @@ void fetchCards(const String& version) {
   auto client = serverClient();
   HTTPClient http;
   http.setTimeout(serverIsHttps() ? 8000 : 4000);
-  if (!http.begin(*client, S.serverUrl + "/api/v1/cards")) return;
-  http.addHeader("X-Device-Key", S.deviceKey);
+  if (!http.begin(*client, activeUrl() + "/api/v1/cards")) return;
+  http.addHeader("X-Device-Key", activeKey());
   int code = http.GET();
   if (code != 200) { http.end(); return; }
   String body = http.getString();
@@ -138,6 +163,8 @@ void fetchCards(const String& version) {
 }
 
 void syncServer() {
+  // on the failover server: give the primary another chance every few minutes
+  if (useBackup && millis() - backupSinceMs >= PRIMARY_RETRY_MS) switchServer(false, "retrying");
   JsonDocument req;
   req["fw"] = FW_VERSION;
   req["cards_version"] = cacheVersion;
@@ -350,6 +377,7 @@ void setupWeb() {
     d["rssi"] = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0;
     d["time"] = nowTs();
     d["serverOk"] = serverOk;
+    d["serverBackup"] = useBackup && hasBackup();
     d["queued"] = !offlineQ.empty();
     d["cards"] = activeCards().cards.size();
     d["readerOk"] = readerOk;
@@ -573,24 +601,44 @@ String setupApName() { return "RFID-Setup-" + String(ESP.getChipId(), HEX); }
 
 WiFiEventHandler onDisconnect, onGotIp;
 
-// Radio settings that make the ESP8266 reliable with picky routers. Must be
-// re-applied after every WiFi.mode() change.
-//  - 802.11g: some routers (seen with Vodafone/FRITZ!Box) never answer the 802.11n
-//    association (disconnect reason 2, AUTH_EXPIRE); the device only sends tiny requests.
-//  - no modem sleep: avoids being dropped by routers that mishandle sleeping clients.
-//  - 17 dBm instead of 20.5: fewer garbled frames close to the router / on weak supplies.
+// Radio settings: the chip's defaults (802.11n, full power) without modem sleep,
+// which some routers mishandle. If joining keeps failing we alternate to 802.11g
+// on the next attempt (some routers never answer the ESP8266's 802.11n
+// association: disconnect reason 2), and keep whichever mode last worked.
+// Only ever called while NOT connected: changing the PHY mode on a live link
+// stops traffic without any disconnect event.
+bool phyG = false;
+uint32_t joinStartMs = 0;
+
 void configureRadio() {
-  WiFi.setPhyMode(WIFI_PHY_MODE_11G);
+  WiFi.setPhyMode(phyG ? WIFI_PHY_MODE_11G : WIFI_PHY_MODE_11N);
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
-  WiFi.setOutputPower(17.0);
+}
+
+void beginJoin() {
+  configureRadio();
+  WiFi.begin(S.wifiSsid.c_str(), S.wifiPass.c_str());
+  joinStartMs = millis();
+  Serial.printf("[wifi] joining \"%s\" (802.11%s)\n", S.wifiSsid.c_str(), phyG ? "g" : "n");
 }
 
 void startNetwork() {
   WiFi.persistent(false);
   onDisconnect = WiFi.onStationModeDisconnected([](const WiFiEventStationModeDisconnected& e) {
+    // log every reason; collapse rapid repeats of the same one
     static uint8_t lastReason = 0;
-    if (e.reason != lastReason) Serial.printf("[wifi] router disconnect reason %d\n", e.reason);
-    lastReason = e.reason;
+    static uint32_t lastMs = 0;
+    static uint16_t repeats = 0;
+    uint32_t now = millis();
+    if (e.reason != lastReason || now - lastMs > 10000) {
+      if (repeats) Serial.printf("[wifi] (reason %d repeated %u more times)\n", lastReason, repeats);
+      Serial.printf("[wifi] router disconnect reason %d\n", e.reason);
+      lastReason = e.reason;
+      lastMs = now;
+      repeats = 0;
+    } else {
+      repeats++;
+    }
   });
   onGotIp = WiFi.onStationModeGotIP([](const WiFiEventStationModeGotIP& e) {
     Serial.printf("[wifi] got IP %s\n", e.ip.toString().c_str());
@@ -607,12 +655,18 @@ void startNetwork() {
 
   if (S.wifiSsid.length()) {
     WiFi.mode(WIFI_STA);
-    configureRadio();
     WiFi.setAutoReconnect(true);
-    WiFi.begin(S.wifiSsid.c_str(), S.wifiPass.c_str());
+    beginJoin();
     uint32_t t0 = millis();
+    bool switched = false;
     fb.setIdle(Feedback::IDLE_SETUP);
     while (WiFi.status() != WL_CONNECTED && millis() - t0 < WIFI_CONNECT_MS) {
+      // half the boot window in 802.11n, the other half in 802.11g
+      if (!switched && millis() - t0 >= WIFI_CONNECT_MS / 2) {
+        switched = true;
+        phyG = !phyG;
+        beginJoin();
+      }
       fb.update();
       delay(50);
     }
@@ -631,12 +685,69 @@ void startNetwork() {
   WiFi.mode(WIFI_AP_STA);
   configureRadio();
   WiFi.softAP(setupApName().c_str(), S.apPass.c_str());
-  if (S.wifiSsid.length()) WiFi.begin(S.wifiSsid.c_str(), S.wifiPass.c_str());
+  if (S.wifiSsid.length()) beginJoin();
   setupAp = true;
   fb.setIdle(Feedback::IDLE_SETUP);
   network = "وای‌فای راه‌اندازی «" + setupApName() + "» (به روتر وصل نیست)";
   Serial.printf("[wifi] setup AP \"%s\" pass \"%s\" at %s\n", setupApName().c_str(),
                 S.apPass.c_str(), WiFi.softAPIP().toString().c_str());
+}
+
+// Router came back while the setup AP was open. mDNS is restarted around the
+// AP teardown (it is bound to the AP interface; leaving it caused a crash) and
+// the radio settings are left alone, as the link is already up.
+void closeSetupAp() {
+  MDNS.end();
+  WiFi.softAPdisconnect(true);   // AP_STA -> STA
+  MDNS.begin(S.deviceName.c_str());
+  MDNS.addService("http", "tcp", 80);
+  setupAp = false;
+  fb.setIdle(Feedback::IDLE_OK);
+  network = "وای‌فای «" + S.wifiSsid + "»";
+  configTime(0, 0, S.ntpServer.c_str());
+  Serial.println("[wifi] setup AP closed");
+}
+
+// Keeps the router link alive: retries while disconnected (alternating
+// 802.11n/g), and in server mode rejoins when the link is "up" but the server
+// has stopped answering, which some routers cause without a disconnect event.
+void maintainWifi(uint32_t ms) {
+  if (S.wifiSsid.isEmpty() || (!S.isServerMode() && S.apOnly)) return;
+  static bool wasUp = false;
+  static uint32_t upSinceMs = 0, lastRejoinMs = 0, lastLogMs = 0;
+
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!wasUp) {
+      wasUp = true;
+      upSinceMs = ms;
+      Serial.printf("[wifi] connected, IP %s, signal %d dBm, 802.11%s\n",
+                    WiFi.localIP().toString().c_str(), WiFi.RSSI(), phyG ? "g" : "n");
+      if (setupAp) closeSetupAp();
+    }
+    uint32_t quietMs = ms - max(lastNetOkMs, upSinceMs);
+    if (S.isServerMode() && S.serverUrl.length() && quietMs > LINK_DEAD_MS && ms - lastRejoinMs > LINK_DEAD_MS) {
+      Serial.printf("[wifi] connected but no reply from the server for %us: rejoining\n", quietMs / 1000);
+      lastRejoinMs = ms;
+      wasUp = false;
+      WiFi.disconnect();
+      beginJoin();
+    }
+    return;
+  }
+
+  if (wasUp) {
+    wasUp = false;
+    joinStartMs = ms;   // give the SDK's own auto-reconnect a chance first
+    Serial.println("[wifi] link lost, reconnecting");
+  }
+  if (ms - joinStartMs >= WIFI_RETRY_MS) {
+    phyG = !phyG;
+    beginJoin();
+  }
+  if (ms - lastLogMs >= 30000) {
+    lastLogMs = ms;
+    Serial.printf("[wifi] still trying \"%s\": %s\n", S.wifiSsid.c_str(), wifiStatusText(WiFi.status()));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -681,23 +792,7 @@ void loop() {
   MDNS.update();
   fb.update();
 
-  // router came back while the setup AP was open -> close the AP
-  if (setupAp && WiFi.status() == WL_CONNECTED) {
-    WiFi.softAPdisconnect(true);
-    WiFi.mode(WIFI_STA);
-    configureRadio();
-    setupAp = false;
-    fb.setIdle(Feedback::IDLE_OK);
-    network = "وای‌فای «" + S.wifiSsid + "»";
-    configTime(0, 0, S.ntpServer.c_str());
-    Serial.printf("[wifi] connected, IP %s\n", WiFi.localIP().toString().c_str());
-  }
-
-  static uint32_t lastWifiLogMs = 0;
-  if (setupAp && S.wifiSsid.length() && ms - lastWifiLogMs >= 30000) {
-    lastWifiLogMs = ms;
-    Serial.printf("[wifi] still trying \"%s\": %s\n", S.wifiSsid.c_str(), wifiStatusText(WiFi.status()));
-  }
+  maintainWifi(ms);
 
   if (ms - lastPollMs >= 50) {
     lastPollMs = ms;

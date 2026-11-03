@@ -21,7 +21,7 @@
 #define BUZZER_ACTIVE_LOW  false   // many 3-pin "low level trigger" buzzer modules need true
 #define RELAY_ACTIVE_LOW   true    // most blue relay boards are active-LOW
 
-#define FW_VERSION         "1.0.0"
+#define FW_VERSION         "1.0.1"
 
 #define MAX_CARDS          200
 #define LOG_MAX_BYTES      60000   // local log is rotated to /log.old when it grows past this
@@ -32,4 +32,7 @@
 #define SYNC_INTERVAL_MS   5000    // heartbeat to server (remote-open latency)
 #define READER_CHECK_MS    30000   // RC522 health check / re-init
 #define WIFI_CONNECT_MS    15000   // at boot; after that the setup AP is opened
+#define WIFI_RETRY_MS      20000   // while disconnected: rejoin (alternating 802.11n/g) this often
+#define LINK_DEAD_MS       45000   // server mode: rejoin Wi-Fi if the server is silent this long
+#define PRIMARY_RETRY_MS   300000  // while on the failover server, retry the primary this often
 #define NAME_MAX_LEN       96      // bytes (UTF-8): ~32 Persian letters + margin

@@ -57,6 +57,8 @@ label{display:block;margin:8px 0 3px;color:var(--mut);font-size:13px}.row{displa
  </div>
  <div class="box" id="srvBox"><h2>سرور</h2>
   <div class="row"><div><label>آدرس سرور</label><input id="s-serverUrl" dir="ltr" placeholder="http://192.168.1.10:8080 / https://….workers.dev"></div><div><label>کلید دستگاه (از صفحه «درها» در پنل سرور)</label><input id="s-deviceKey" type="password" dir="ltr" placeholder="بدون تغییر"></div></div>
+  <div class="row"><div><label>آدرس سرور پشتیبان (اختیاری)</label><input id="s-serverUrl2" dir="ltr" placeholder="https://….workers.dev"></div><div><label>کلید دستگاه در سرور پشتیبان (خالی = همان کلید)</label><input id="s-deviceKey2" type="password" dir="ltr" placeholder="بدون تغییر"></div></div>
+  <p class=mut style="margin:0 0 8px">اگر سرور اصلی در دسترس نباشد، دستگاه به سرور پشتیبان وصل می‌شود و هر ۵ دقیقه دوباره سرور اصلی را امتحان می‌کند.</p>
   <label class="chk"><input type="checkbox" id="s-offlineFallback"> اگر سرور در دسترس نبود، از فهرست ذخیره‌شده کارت‌ها استفاده شود</label>
  </div>
  <div class="box"><h2>ورود به پنل</h2>
@@ -84,7 +86,7 @@ async function loadStatus(){S=await api('/api/status');const srv=S.mode=='server
  $('#title').textContent=S.deviceName;
  const rows=[['حالت',srv?'سرور':'مستقل'],['شبکه',esc(S.network)],['IP','<span class=mono>'+S.ip+'</span>'],['قدرت سیگنال',S.rssi?'<span class=mono>'+S.rssi+' dBm</span>':'—'],['زمان',fmt(S.time)],
   ['تعداد کارت',n(S.cards)],['کارت‌خوان',S.readerOk?'<span class=ok>سالم</span>':'<span class=bad>شناسایی نشد</span>'],['مدت روشن بودن',n(Math.round(S.uptime/60))+' دقیقه'],['حافظه آزاد',n(S.heap)+' بایت'],['نسخه',S.fw]];
- if(srv)rows.splice(2,0,['سرور',S.serverOk?'<span class=ok>متصل</span>':'<span class=bad>در دسترس نیست</span>'+(S.queued?' (رویدادها در صف ارسال)':'')]);
+ if(srv)rows.splice(2,0,['سرور',S.serverOk?'<span class=ok>متصل</span>'+(S.serverBackup?' (سرور پشتیبان)':''):'<span class=bad>در دسترس نیست</span>'+(S.queued?' (رویدادها در صف ارسال)':'')]);
  $('#kv').innerHTML=rows.map(r=>`<span class=mut>${r[0]}</span><span>${r[1]}</span>`).join('');
  if(S.lastResult){$('#last').innerHTML=(S.lastUid?`<span class=mono>${esc(S.lastUid)}</span> — `:'')+(S.lastName?`<b>${esc(S.lastName)}</b> — `:'')+`${esc(RES[S.lastResult]||S.lastResult)} <span class=mut>${fmt(S.lastTime)}</span>`+
   (!srv&&S.lastResult=='unknown'?` <button class="btn sm" onclick="addLast()">ثبت این کارت</button>`:'')}
@@ -107,7 +109,8 @@ async function loadLog(){const l=await api('/api/log?n=100');
  $('#log').innerHTML=l.map(e=>`<tr><td style="white-space:nowrap">${fmt(e.t)}</td><td>${esc(e.name)}</td><td class=mono>${esc(e.uid)}</td><td class=${e.r=='granted'||e.r=='enrolled'||e.r=='manual'?'ok':'bad'}>${esc(RES[e.r]||e.r)}</td><td>${DIR[e.d]||'—'}</td></tr>`).join('')||'<tr><td colspan=5 class=mut>خالی است.</td></tr>'}
 async function loadSettings(){const s=await api('/api/settings');
  for(const[k,v]of Object.entries(s)){const el=$('#s-'+k);if(!el)continue;if(el.type=='checkbox')el.checked=v;else if(el.type!='password')el.value=v}
- $('#s-deviceKey').placeholder=s.hasDeviceKey?'بدون تغییر':'تنظیم نشده';syncSrvBox()}
+ $('#s-deviceKey').placeholder=s.hasDeviceKey?'بدون تغییر':'تنظیم نشده';
+ $('#s-deviceKey2').placeholder=s.hasDeviceKey2?'بدون تغییر':'همان کلید اصلی';syncSrvBox()}
 function syncSrvBox(){$('#srvBox').style.opacity=$('#s-mode').value=='server'?1:.5}
 $('#s-mode').onchange=syncSrvBox;
 async function saveSettings(){const o={};document.querySelectorAll('[id^=s-]').forEach(el=>{const k=el.id.slice(2);
