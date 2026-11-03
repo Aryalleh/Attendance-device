@@ -1,0 +1,31 @@
+# RFID access-control server on Cloudflare Workers + D1.
+# Setup: see README.md in this folder.
+name = "accessctl"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+# Copies ../server/static (stylesheet + Vazirmatn font) into public/static before dev/deploy.
+[build]
+command = "node scripts/copy-static.mjs"
+
+[assets]
+directory = "public"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "accessctl"
+database_id = "00000000-0000-0000-0000-000000000000"   # replace with the id printed by: npx wrangler d1 create accessctl
+migrations_dir = "migrations"
+
+[vars]
+# Time zone for dates in the panel, reports and the daily card-expiry check.
+TZ = "Asia/Tehran"
+# Live door screen refresh (ms). Every poll is one Worker request: the free plan allows
+# 100k requests/day, and each door already uses ~17k/day for its 5-second sync.
+LIVE_POLL_MS = "3000"
+
+# Secrets (never put these in this file):
+#   npx wrangler secret put SECRET_KEY              signs login sessions and kiosk links (any long random string)
+#   npx wrangler secret put ADMIN_PASSWORD          password for user 'admin' on first login
+#   npx wrangler secret put ACCESSCTL_API_TOKEN     optional: read-only integration API
+#   npx wrangler secret put ACCESSCTL_WEBHOOK_URL   optional: POST every access event here
