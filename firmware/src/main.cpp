@@ -553,6 +553,18 @@ String setupApName() { return "RFID-Setup-" + String(ESP.getChipId(), HEX); }
 
 WiFiEventHandler onDisconnect, onGotIp;
 
+// Radio settings that make the ESP8266 reliable with picky routers. Must be
+// re-applied after every WiFi.mode() change.
+//  - 802.11g: some routers (seen with Vodafone/FRITZ!Box) never answer the 802.11n
+//    association (disconnect reason 2, AUTH_EXPIRE); the device only sends tiny requests.
+//  - no modem sleep: avoids being dropped by routers that mishandle sleeping clients.
+//  - 17 dBm instead of 20.5: fewer garbled frames close to the router / on weak supplies.
+void configureRadio() {
+  WiFi.setPhyMode(WIFI_PHY_MODE_11G);
+  WiFi.setSleepMode(WIFI_NONE_SLEEP);
+  WiFi.setOutputPower(17.0);
+}
+
 void startNetwork() {
   WiFi.persistent(false);
   onDisconnect = WiFi.onStationModeDisconnected([](const WiFiEventStationModeDisconnected& e) {
@@ -575,10 +587,7 @@ void startNetwork() {
 
   if (S.wifiSsid.length()) {
     WiFi.mode(WIFI_STA);
-    // 802.11g: some routers (seen with Vodafone/FRITZ!Box) never answer the ESP8266's
-    // 802.11n association (disconnect reason 2, AUTH_EXPIRE). The device only sends tiny
-    // requests, so g-mode costs nothing.
-    WiFi.setPhyMode(WIFI_PHY_MODE_11G);
+    configureRadio();
     WiFi.setAutoReconnect(true);
     WiFi.begin(S.wifiSsid.c_str(), S.wifiPass.c_str());
     uint32_t t0 = millis();
@@ -600,6 +609,7 @@ void startNetwork() {
   // Not configured or router unreachable: open a setup AP. The device still
   // works as a reader meanwhile, and keeps retrying the router in background.
   WiFi.mode(WIFI_AP_STA);
+  configureRadio();
   WiFi.softAP(setupApName().c_str(), S.apPass.c_str());
   if (S.wifiSsid.length()) WiFi.begin(S.wifiSsid.c_str(), S.wifiPass.c_str());
   setupAp = true;
@@ -655,6 +665,7 @@ void loop() {
   if (setupAp && WiFi.status() == WL_CONNECTED) {
     WiFi.softAPdisconnect(true);
     WiFi.mode(WIFI_STA);
+    configureRadio();
     setupAp = false;
     fb.setIdle(Feedback::IDLE_OK);
     network = "وای‌فای «" + S.wifiSsid + "»";
