@@ -1,14 +1,20 @@
-# RFID access control (Wemos D1 mini + RC522)
+**English** | [فارسی](README.fa.md)
 
-A door reader that identifies people by RFID card, opens an electric lock for
-allowed cards, refuses (with a buzzer alarm) unknown or blocked cards, and
-logs every entry/exit with date and time.
+# RFID attendance & access control (Wemos D1 mini + RC522)
+
+A card reader that identifies people by RFID card and shows the result with LEDs
+and a buzzer: green and a short beep for allowed cards, red and an alarm for unknown
+or blocked cards. It logs every entry and exit with date and time. An optional relay
+output can drive an electric lock.
+
+📖 **Assembly guide:** [English](docs/assembly-en.md) · [فارسی](docs/assembly-fa.md)
+📄 **Project proposal (Persian):** [docs/proposal-fa.md](docs/proposal-fa.md)
 
 ```
             ┌───────────── server mode ──────────────┐
- card ─► RC522 ─► Wemos D1 mini ──HTTP──► server (Raspberry Pi, Flask + SQLite)
-                   │  LEDs, buzzer, relay → lock      web panel: cards, doors, log,
-                   │                                   attendance, who's inside
+ card ─► RC522 ─► Wemos D1 mini ──Wi-Fi──► server (Raspberry Pi, Flask + SQLite)
+                   │  LEDs, buzzer              web panel: cards, devices, log,
+                   │  (optional relay → lock)   attendance, who's inside, live screen
                    └─ standalone mode: cards + log + panel on the Wemos itself
 ```
 
@@ -17,24 +23,38 @@ logs every entry/exit with date and time.
 | Who decides | the server | the Wemos |
 | Card list / log | SQLite on the server | flash on the Wemos (≤200 cards, ~2000 log lines) |
 | Admin panel | server: `http://<pi>:8080` | device: `http://<device-name>.local` or its IP |
-| Multiple doors | yes, shared card list | each door is independent |
-| Server down? | door keeps working from a cached card list; events are uploaded later | n/a |
-| Needs a router | yes | no — the device can create its own Wi-Fi |
+| Multiple devices | yes, shared card list | each device is independent |
+| Server down? | keeps working from a cached card list; events are uploaded later | n/a |
+| Needs a router | yes | no: the device can create its own Wi-Fi |
 
-You switch modes in the device's own panel (Settings → Mode). No display is needed.
+You switch modes in the device's own panel (Settings → Mode). No display is needed on the device.
+
+## Repository layout
+
+| Folder | Contents |
+|---|---|
+| `firmware/` | Wemos firmware (C++, PlatformIO) |
+| `server/` | Server and web panel (Python, Flask, SQLite) |
+| `hardware/` | KiCad schematic generator for the carrier board |
+| `docs/` | Assembly guide (EN/FA) and project proposal |
+| `cloudflare/` | Optional: the same server on Cloudflare Workers ([its README](cloudflare/README.md)) |
 
 ---
 
 ## 1. Hardware
 
+The device is powered **from USB** (5 V into the Wemos's micro-USB port). The Wemos's
+regulator makes 3.3 V for the RC522. Full step-by-step instructions are in the
+[assembly guide](docs/assembly-en.md).
+
 | Part | Notes |
 |---|---|
 | Wemos D1 mini (ESP8266) | |
 | RC522 RFID module + 13.56 MHz cards/tags | **3.3 V only** |
-| Green LED + red LED (+ 220 Ω resistors) or an LED module | |
-| Buzzer module (active buzzer) | set `BUZZER_ACTIVE_LOW` in `config.h` to match it |
-| Relay module or MOSFET module + 12 V electric lock / strike | relay must switch from 3.3 V logic; put a flyback diode across the lock coil |
-| 5 V supply for the Wemos, 12 V for the lock | common GND |
+| Green LED + red LED + 2 × 220 Ω resistors | or an LED module |
+| Buzzer | a low-level-trigger buzzer module, or a 5 V active buzzer with the 2-transistor driver from the assembly guide |
+| USB cable (data-capable) + 5 V USB adapter | ≥ 500 mA |
+| *Optional:* relay module + electric lock | needs its own lock supply; see the [relay note](#optional-relay-and-lock) |
 
 ### Wiring
 
@@ -43,19 +63,17 @@ You switch modes in the device's own panel (Settings → Mode). No display is ne
 | SDA (SS) | D8 | | Green LED | D1 |
 | SCK | D5 | | Red LED | D2 |
 | MOSI | D7 | | Buzzer | D3 |
-| MISO | D6 | | Relay IN (lock) | D4 |
+| MISO | D6 | | *(optional)* Relay IN | D4 |
 | RST | D0 | | | |
 | 3.3V | 3V3 | | | |
 | GND | G | | | |
 | IRQ | — | | | |
 
 SCK/MISO/MOSI (D5/D6/D7) are the ESP8266's hardware SPI pins and can't be moved.
-D3/D4 must be HIGH and D8 LOW at boot. An active-LOW relay on D4 stays **off** while
-the board boots. For the buzzer on D3, a **low-level-trigger** module (set
-`BUZZER_ACTIVE_LOW true`) is best: it stays silent at boot. A high-level-trigger module
-will chirp briefly at power-on. If its input pulls D3 to GND, the board won't boot
-normally; it enters flash mode instead. D4 is also the
-Wemos's on-board LED, so that LED lights while the lock is open.
+D3/D4 must be HIGH and D8 LOW at boot. That is why the buzzer on D3 must be **silent when
+its input is HIGH**: use a low-level-trigger module or the transistor driver, and set
+`BUZZER_ACTIVE_LOW true` in `firmware/src/config.h`. D4 is also the Wemos's on-board
+LED, so that LED lights while access is granted.
 
 Pins and active-high/low polarity are set in `firmware/src/config.h`.
 
@@ -63,13 +81,13 @@ Pins and active-high/low polarity are set in `firmware/src/config.h`.
 
 | What you see/hear | Meaning |
 |---|---|
-| short beep + green on while the lock is open | access granted |
+| short beep + green | access granted (entry/exit logged) |
 | 3 × red + beep | blocked / expired card |
 | 1 long red + beep | unknown card |
 | green/red alternating | waiting for a card to enroll (standalone) |
 | short red flash every 3 s | server mode: server unreachable (using offline cache) |
 | slow red blink | setup Wi-Fi hotspot is open (not connected to the router) |
-| 3 × red, no beep at boot | RC522 not detected — check wiring |
+| 3 × red, no beep at boot | RC522 not detected: check wiring |
 
 ---
 
@@ -83,14 +101,16 @@ pio run -t upload        # build + flash
 pio device monitor       # serial log, 115200 baud
 ```
 
+Don't run `pio run -t uploadfs`: it erases the saved settings and cards.
+
 ### First start
 
 1. On first boot the device opens a Wi-Fi hotspot **`RFID-Setup-xxxxxx`**, password **`rfid12345`**.
 2. Connect to it and open **http://192.168.4.1**. Log in as **admin / admin**.
 3. In **Settings**, choose a mode, fill in the Wi-Fi and server settings, **change the admin password**, then press *Save & reboot*.
 
-If the router is unreachable at boot, the setup hotspot opens again. The door
-keeps working meanwhile, and the hotspot closes once the router is reachable.
+If the router is unreachable at boot, the setup hotspot opens again. The device keeps
+working meanwhile, and the hotspot closes once the router is reachable.
 
 ### Standalone (small teams)
 
@@ -105,14 +125,14 @@ keeps working meanwhile, and the hotspot closes once the router is reachable.
 
 ### Server mode
 
-1. In the server panel, go to **Doors → Add a door**. Copy the **device key** shown (it is shown only once).
+1. In the server panel, go to **Doors → Add**. Copy the **device key** shown (it is shown only once).
 2. In the device panel, set Mode = Server, enter the **Server URL** (e.g. `http://192.168.1.10:8080`) and the **Device key**.
 3. Scan a new card. It appears on the server dashboard under **Unregistered cards**, where you click **Register**.
 
 The device sends a heartbeat every 5 s. Through it, the device downloads the card list whenever it
 changes, picks up "Open" commands from the panel, takes its clock from the server, and uploads
-events it decided while offline (marked *offline* in the log). To make the door stay locked when
-the server is down, untick *"use the cached card list"*.
+events it decided while offline (marked *offline* in the log). To refuse all cards while the
+server is down, untick *"use the cached card list"*.
 
 ---
 
@@ -152,17 +172,16 @@ start with a UTF-8 BOM, so Excel displays Persian names correctly. The server bu
 Vazirmatn font (`static/fonts`, SIL OFL), so it doesn't need internet. The device panel uses
 the system font (Tahoma/Segoe UI).
 
-
 - **Live screen** (landing page, `/`): a full-screen display for a tablet or monitor by the door. It shows the
   person's name with a green ✓ «خوش آمدید / خدانگهدار», or a red ✗ «دسترسی رد شد» with the reason (unknown card,
   blocked or expired). Each scan plays a sound through the browser (Web Audio, no audio files needed). It also shows
   a clock in Shamsi date and the last 10 scans. Tap the screen once so the browser allows sound, and use the ⛶ button
-  for full screen. **Doors → نمایشگر** gives each door a private link that works without logging in.
-  Anyone with the link can see that door's scans, and **New key** revokes it.
-- **Dashboard** (`/dashboard`): who is inside, today's counts, door online/offline status with an *Open* button, unregistered cards, recent activity.
+  for full screen. **Doors → نمایشگر** gives each device a private link that works **without logging in**.
+  Anyone with the link can see that device's scans, and **New key** revokes it.
+- **Dashboard** (`/dashboard`): who is inside, today's counts, device online/offline status, unregistered cards, recent activity.
 - **Cards**: add, edit, block or allow; optional **valid-until** date and a note; per-card history.
-- **Doors**: direction (entry, exit or toggle), unlock time, enable/disable, new key.
-- **Log**: filter by name, UID, result, door and date; CSV export.
+- **Doors** (devices): direction (entry, exit or toggle), enable/disable, new key, live-screen link.
+- **Log**: filter by name, UID, result, device and date; CSV export.
 - **Attendance**: first in, last out and time on site per person per day.
 - **Settings**: panel users and passwords, purging old events.
 
@@ -184,16 +203,24 @@ All requests carry the header `X-Device-Key: <key>`.
 | `POST /api/v1/sync` | `{"fw":"1.0.0","cards_version":"…","events":[{ts,uid,result,direction}…]}` | `{"time":…,"cards_version":"…","open":false,"open_ms":3000}` |
 | `GET /api/v1/cards` | — | TSV lines `uid⇥1⇥inside⇥name` (valid cards only) |
 
-`result` is one of `granted | unknown | disabled | expired | denied` (denied = door disabled).
+`result` is one of `granted | unknown | disabled | expired | denied` (denied = device disabled).
+
+---
+
+## Optional: relay and lock
+
+The firmware also drives a relay on **D4** for `open_ms` milliseconds (default 3 s) on every
+granted scan, and on **Open** from the panel. To use it, connect an active-LOW relay module
+(`RELAY_ACTIVE_LOW true`) to D4 and give the lock **its own power supply**. Don't power a
+lock from the Wemos's USB 5 V. Put a flyback diode across the lock coil, and keep a
+mechanical or exit-button release on the inside of the door.
 
 ---
 
 ## Security notes
 
 - Basic 13.56 MHz cards (MIFARE Classic, cheap tags) **can be cloned**. Only the UID is checked,
-  so this suits offices, labs and team rooms, not high-security doors.
-- The device panel uses HTTP Basic auth, and device ↔ server traffic is plain HTTP. Keep both on
-  a trusted LAN or Wi-Fi, and don't port-forward them to the internet.
+  so this suits attendance in offices, labs and classrooms, not high-security doors.
+- The device panel uses HTTP Basic auth, and device ↔ Flask server traffic is plain HTTP. Keep both
+  on a trusted LAN or Wi-Fi, and don't port-forward them to the internet.
 - Change `admin/admin` and the hotspot password on first setup.
-- Fail-secure vs fail-safe: a normal strike with an active-LOW relay stays locked when power is lost.
-  Check what your fire code requires for exit doors, and add a mechanical or exit-button release on the inside.
