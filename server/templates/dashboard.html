@@ -9,9 +9,22 @@
   <div class="stat"><b>{{ cards|length|fa }}</b><span>کارت ثبت‌شده</span></div>
 </div>
 
+{% if running %}
+<div class="box">
+  <h2>کلاس‌های در حال برگزاری</h2>
+  {% for r in running %}
+  <div class="row" style="padding:4px 0">
+    <div><a href="{{ url_for('class_session', class_id=r.cls.id, slot_id=r.s.slot.id, day=r.s.date.isoformat()) }}"><b>{{ r.cls.name }}</b></a>
+      <span class="mut">· {{ r.s.slot.door or '—' }} · {{ r.s.slot.start_min|hm }} تا {{ r.s.slot.end_min|hm }}</span></div>
+    <div class="auto"><span class="pill ok">{{ r.here|fa }} نفر حاضر</span> <span class="mut">از {{ r.members|fa }} عضو</span></div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 <div class="grid">
   <div class="box">
-    <h2>درها</h2>
+    <h2>دستگاه‌ها</h2>
     {% for d in doors %}
     <div class="row" style="padding:4px 0">
       <div><span class="dot {{ 'on' if d.last_seen and d.last_seen >= online_after else 'off' }}"></span>{{ d.name }}
@@ -19,7 +32,7 @@
       <form class="inline auto" method="post" action="{{ url_for('door_open', door_id=d.id) }}">{{ csrf() }}<button class="btn sm">باز کن</button></form>
     </div>
     {% else %}
-    <p class="mut">هنوز دری تعریف نشده. از صفحه <a href="{{ url_for('doors') }}">درها</a> یک در اضافه کنید و کلید آن را در تنظیمات دستگاه وارد کنید.</p>
+    <p class="mut">هنوز دستگاهی تعریف نشده. از صفحه <a href="{{ url_for('doors') }}">دستگاه‌ها</a> یک دستگاه اضافه کنید و کلید آن را در تنظیمات دستگاه وارد کنید.</p>
     {% endfor %}
   </div>
 

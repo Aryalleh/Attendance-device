@@ -25,6 +25,10 @@
 
 {% if not new %}
 <div class="box">
+  <h2>کلاس‌ها</h2>
+  {% for k in classes %}<a class="pill ok" href="{{ url_for('class_view', class_id=k.id) }}">{{ k.name }}</a> {% else %}<p class="mut">عضو هیچ کلاسی نیست. اعضای هر کلاس از صفحهٔ همان کلاس انتخاب می‌شوند.</p>{% endfor %}
+</div>
+<div class="box">
   <h2>سوابق تردد</h2>
   {{ events_table(history) }}
 </div>

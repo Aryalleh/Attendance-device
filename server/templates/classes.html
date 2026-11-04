@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}کلاس‌ها · کنترل تردد{% endblock %}
+{% block body %}
+<h1>کلاس‌ها</h1>
+<p class="mut">برای هر کلاس اعضا را انتخاب کنید و آن را در زمان‌های مشخص به یک دستگاه وصل کنید. در آن زمان‌ها اعضا با کارت‌زدن ورود و خروج خود را ثبت می‌کنند؛ کارت افرادی که عضو کلاس نیستند رد می‌شود.</p>
+<div class="box scroll">
+<table>
+<thead><tr><th>کلاس</th><th>اعضا</th><th>زمان‌بندی</th><th></th></tr></thead>
+<tbody>
+{% for k in classes %}
+<tr>
+  <td><a href="{{ url_for('class_view', class_id=k.id) }}"><b>{{ k.name }}</b></a>{% if k.note %}<div class="mut" style="font-size:12px">{{ k.note }}</div>{% endif %}</td>
+  <td>{{ k.members|fa }} نفر</td>
+  <td>{% for s in slots.get(k.id, []) %}<div class="nowrap">{% if s.on_date %}{{ s.on_date|jinput|fa }}{% else %}{{ WEEKDAYS_FA[s.weekday] }}‌ها{% endif %} {{ s.start_min|hm }}–{{ s.end_min|hm }} <span class="mut">· {{ s.door or '—' }}</span></div>{% else %}<span class="mut">بدون زمان‌بندی</span>{% endfor %}</td>
+  <td class="end"><a class="btn sec sm" href="{{ url_for('class_view', class_id=k.id) }}">گزارش و تنظیم</a></td>
+</tr>
+{% else %}
+<tr><td colspan="4" class="mut">هنوز کلاسی تعریف نشده است.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+<div class="box">
+  <h2>کلاس جدید</h2>
+  <form method="post" class="row">{{ csrf() }}
+    <div><label>نام کلاس</label><input name="name" maxlength="60" placeholder="ریاضی ۱ — گروه الف" required></div>
+    <div><label>توضیحات (اختیاری)</label><input name="note" maxlength="200"></div>
+    <div class="auto"><button class="btn">ساخت کلاس</button></div>
+  </form>
+</div>
+{% endblock %}

@@ -6,8 +6,10 @@
 <form class="box row" method="get">
   <div><label>جستجو</label><input name="q" value="{{ args.q or '' }}" placeholder="نام یا شناسه کارت"></div>
   <div><label>نتیجه</label><select name="result"><option value="">همه</option>
-    {% for r in ['granted','unknown','disabled','expired','denied','manual'] %}<option value="{{ r }}" {{ 'selected' if args.result == r }}>{{ RESULT_FA[r] }}</option>{% endfor %}</select></div>
-  <div><label>در</label><select name="door"><option value="">همه</option>
+    {% for r in ['granted','unknown','disabled','expired','denied','not_member','manual'] %}<option value="{{ r }}" {{ 'selected' if args.result == r }}>{{ RESULT_FA[r] }}</option>{% endfor %}</select></div>
+  <div><label>کلاس</label><select name="class"><option value="">همه</option>
+    {% for k in classes %}<option value="{{ k.id }}" {{ 'selected' if args['class'] == k.id|string }}>{{ k.name }}</option>{% endfor %}</select></div>
+  <div><label>دستگاه</label><select name="door"><option value="">همه</option>
     {% for d in doors %}<option value="{{ d.id }}" {{ 'selected' if args.door == d.id|string }}>{{ d.name }}</option>{% endfor %}</select></div>
   <div><label>از تاریخ</label><input name="from" dir="ltr" value="{{ args['from'] or '' }}" placeholder="1405/08/01"></div>
   <div><label>تا تاریخ</label><input name="to" dir="ltr" value="{{ args.to or '' }}" placeholder="1405/08/30"></div>

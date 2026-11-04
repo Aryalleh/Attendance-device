@@ -172,7 +172,7 @@ python3 -m venv /opt/accessctl/venv
 cd /opt/accessctl/server && ACCESSCTL_DATA=/opt/accessctl/data ../venv/bin/python app.py
 ```
 
-The first start prints the generated **admin password**. Open `http://<pi-ip>:8080`.
+The first start prints the generated password for **admin**, the server owner. Open `http://<pi-ip>:8080`.
 
 To run it as a service, next to whatever else the Pi is doing, edit `User=` in
 `server/accessctl.service`, then:
@@ -185,7 +185,46 @@ journalctl -u accessctl -f
 
 It's a single process (waitress, 8 threads) with one SQLite file in `ACCESSCTL_DATA`.
 Back up `access.db` and `secret_key` from that folder.
-To reset a password: `../venv/bin/python app.py set-password admin`.
+To reset a password: `../venv/bin/python app.py set-password admin` (an unknown name creates a new server owner).
+
+### Companies and users
+
+One server can host several **companies** (or teams) that have nothing to do with each other.
+Each company has its own panel users, cards, devices, logs and classes, and never sees another company's data.
+
+- **Server owner** (`admin`, and any owner you add): logs in to **مدیریت سرور** (`/admin`). There you create a company
+  together with its first login, add or remove its users, reset passwords, disable it (its users can't log in and its
+  devices refuse every card) or delete it with all its data. **ورود به پنل** opens any company's panel.
+- **Company users** see only their own panel. They create their own **devices** (each gets a key for the Wemos or the
+  Android app), register cards, define classes and add more users for their company under Settings.
+- The same card UID can be registered in two companies. Device keys are unique across the server, so a scan always
+  belongs to the company that owns the device.
+
+Upgrading from the single-company version is automatic: on first start the existing cards, doors and logs move into a
+company called «سازمان پیش‌فرض», and the existing logins become server owners. Rename it on the admin page.
+
+### Classes (attendance per class)
+
+On the **کلاس‌ها** page a company creates classes, picks the **members** (from its cards) and links the class to a
+**device at set times**:
+
+- **weekly**: one or more weekdays and a time range, optionally between two dates (without a start date it starts on
+  the day you add it), or
+- **once**: an extra session on a single date.
+
+During a session, members scan their card on that device when they **enter** and again when they **leave**
+(the device alternates in/out per session; a device set to entry-only or exit-only records that direction).
+Cards of people who are not members are **refused** and logged as «عضو کلاس نیست». Scans are accepted from 15 minutes
+before the start until 30 minutes after the end, so early arrivals and late exits are recorded, but only time inside
+the class hours counts. An entry with no exit counts until the end of the class and is flagged «خروج ثبت نشد».
+Outside class times the device works as a normal door.
+
+Each class page shows, for a date range (last 30 days by default):
+- every **session** with how many members came, and per session each member's **entry time, exit time and time in
+  class** (absent members are marked «غایب»), plus refused cards;
+- a **summary per member**: sessions attended, total time in class and attendance percentage, with CSV export.
+
+The dashboard lists classes that are running now and how many members are inside.
 
 ### Panel
 
@@ -204,18 +243,21 @@ the system font (Tahoma/Segoe UI).
   Anyone with the link can see that device's scans, and **New key** revokes it.
 - **Dashboard** (`/dashboard`): who is inside, today's counts, device online/offline status, unregistered cards, recent activity.
 - **Cards**: add, edit, block or allow; optional **valid-until** date and a note; per-card history.
-- **Doors** (devices): direction (entry, exit or toggle), enable/disable, new key, live-screen link.
-- **Log**: filter by name, UID, result, device and date; CSV export.
-- **Attendance**: first in, last out and time on site per person per day.
-- **Settings**: panel users and passwords, purging old events.
+- **Devices**: direction (entry, exit or toggle), enable/disable, new key, live-screen link.
+- **Classes**: members, weekly or one-off schedules on a device, per-session and per-member attendance reports.
+- **Log**: filter by name, UID, result, device, class and date; CSV export.
+- **Daily attendance**: first in, last out and time on site per person per day.
+- **Settings**: the company's panel users, purging the company's old events.
+- **Server admin** (owners only): companies, their users, integrations.
 
 ### Hooking it into other things on the server
 
-- `ACCESSCTL_WEBHOOK_URL=http://…`: every event is POSTed as JSON, e.g.
-  `{"time": "...", "door": "Main", "name": "Sara", "uid": "04:A3:1B:2C", "result": "granted", "direction": "in", "offline": false}`.
+- `ACCESSCTL_WEBHOOK_URL=http://…`: every event of every company is POSTed as JSON, e.g.
+  `{"time": "...", "org": "Acme", "org_id": 2, "door": "Main", "name": "Sara", "uid": "04:A3:1B:2C", "result": "granted", "direction": "in", "class_id": null, "offline": false}`.
   Works with Node-RED, Home Assistant, a Telegram bot, etc.
 - `ACCESSCTL_API_TOKEN=…` enables `GET /api/v1/presence` and `GET /api/v1/events?since=<id>`
-  (header `Authorization: Bearer <token>`).
+  (header `Authorization: Bearer <token>`). The token is the server owner's: it reads all companies; add `&org=<id>`
+  to limit it to one.
 
 ### Device ↔ server protocol
 
@@ -228,7 +270,8 @@ All requests carry the header `X-Device-Key: <key>`.
 | `GET /api/v1/cards` | — | TSV lines `uid⇥1⇥inside⇥name` (valid cards only) |
 | `GET /api/v1/kiosk` | — | `{"name":"Front door","url":"/kiosk/<token>"}` — this door's live-screen link (used by the Android app) |
 
-`result` is one of `granted | unknown | disabled | expired | denied` (denied = device disabled).
+`result` is one of `granted | unknown | disabled | expired | denied | not_member` (denied = device or company disabled;
+not_member = scanned during a class session by someone who isn't a member).
 
 ---
 

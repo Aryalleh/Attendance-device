@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}{{ cls.name }} · کلاس‌ها{% endblock %}
+{% block body %}
+<div class="row" style="margin-bottom:12px">
+  <h1>{{ cls.name }}</h1>
+  <a class="btn sec auto" href="{{ url_for('classes') }}">همه کلاس‌ها</a>
+</div>
+{% if cls.note %}<p class="mut">{{ cls.note }}</p>{% endif %}
+
+<form class="box row" method="get">
+  <div><label>از تاریخ</label><input name="from" dir="ltr" value="{{ first|jstr }}" style="width:9em"></div>
+  <div><label>تا تاریخ</label><input name="to" dir="ltr" value="{{ last|jstr }}" style="width:9em"></div>
+  <div class="auto"><button class="btn">نمایش</button> <a class="btn sec" href="{{ url_for('class_csv', class_id=cls.id, **{'from': first|jstr, 'to': last|jstr}) }}">خروجی اکسل (CSV)</a></div>
+</form>
+
+<div class="box scroll">
+  <h2>خلاصه حضور اعضا <span class="mut" style="font-size:14px">({{ sessions|length|fa }} جلسه)</span></h2>
+  <table>
+  <thead><tr><th>نام</th><th>جلسات حاضر</th><th>مجموع زمان حضور</th><th>درصد حضور</th></tr></thead>
+  <tbody>
+  {% for t in summary %}
+  <tr>
+    <td><a href="{{ url_for('card_edit', card_id=t.card.id) }}">{{ t.card.name }}</a></td>
+    <td>{{ t.attended|fa }} از {{ sessions|length|fa }}</td>
+    <td>{{ t.secs|dur }}</td>
+    <td><span class="pill {{ 'ok' if t.pct >= 75 else ('warn' if t.pct >= 40 else 'bad') }}">{{ t.pct|fa }}٪</span></td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4" class="mut">هنوز عضوی برای این کلاس انتخاب نشده است (پایین صفحه).</td></tr>
+  {% endfor %}
+  </tbody>
+  </table>
+</div>
+
+<div class="box scroll">
+  <h2>جلسات</h2>
+  <table>
+  <thead><tr><th>تاریخ</th><th>ساعت</th><th>دستگاه</th><th>حاضران</th><th></th></tr></thead>
+  <tbody>
+  {% for s, present in sessions %}
+  <tr>
+    <td class="nowrap">{{ WEEKDAYS_FA[s.date.weekday()] }} {{ s.date|jstr|fa }}</td>
+    <td class="nowrap">{{ s.slot.start_min|hm }} تا {{ s.slot.end_min|hm }}</td>
+    <td>{{ s.slot.door or '—' }}</td>
+    <td>{{ present|fa }} از {{ n_members|fa }}</td>
+    <td class="end"><a class="btn sec sm" href="{{ url_for('class_session', class_id=cls.id, slot_id=s.slot.id, day=s.date.isoformat()) }}">ورود و خروج‌ها</a></td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5" class="mut">در این بازه جلسه‌ای برگزار نشده است.</td></tr>
+  {% endfor %}
+  </tbody>
+  </table>
+</div>
+
+<div class="grid">
+  <div class="box">
+    <h2>زمان‌بندی و دستگاه</h2>
+    {% for s in slots %}
+    <div class="row" style="padding:3px 0">
+      <div>{% if s.on_date %}<span class="pill mut">یک‌بار</span> {{ s.on_date|jinput|fa }}{% else %}<span class="pill ok">هفتگی</span> {{ WEEKDAYS_FA[s.weekday] }}‌ها{% endif %}
+        {{ s.start_min|hm }} تا {{ s.end_min|hm }} <span class="mut">· {{ s.door or '—' }}{% if s.from_date or s.to_date %} · از {{ (s.from_date|jinput|fa) or '…' }} تا {{ (s.to_date|jinput|fa) or '…' }}{% endif %}</span></div>
+      <form class="inline auto" method="post" action="{{ url_for('class_slot_delete', class_id=cls.id, slot_id=s.id) }}" onsubmit="return confirm('این زمان‌بندی حذف شود؟')">{{ csrf() }}<button class="btn red sm">حذف</button></form>
+    </div>
+    {% else %}
+    <p class="mut">هنوز زمانی تعریف نشده است.</p>
+    {% endfor %}
+    {% if not doors %}
+    <p class="flash error">ابتدا در صفحهٔ <a href="{{ url_for('doors') }}">دستگاه‌ها</a> یک دستگاه بسازید.</p>
+    {% else %}
+    <form method="post" action="{{ url_for('class_slot_add', class_id=cls.id) }}">{{ csrf() }}
+      <h3>افزودن زمان</h3>
+      <label class="check"><input type="radio" name="kind" value="weekly" checked onchange="kindChanged(this.form)"> هفتگی (تکرار در روزهای انتخابی)</label>
+      <label class="check"><input type="radio" name="kind" value="once" onchange="kindChanged(this.form)"> یک‌بار (جلسهٔ فوق‌العاده در یک تاریخ)</label>
+      <div class="weekly">
+        <label>روزهای هفته</label>
+        <div>{% for w in WEEK_ORDER %}<label class="check" style="display:inline-block;margin-inline-end:10px"><input type="checkbox" name="weekday" value="{{ w }}"> {{ WEEKDAYS_FA[w] }}</label>{% endfor %}</div>
+        <div class="row">
+          <div><label>از تاریخ (خالی = از امروز)</label><input name="from_date" dir="ltr" placeholder="1405/07/01"></div>
+          <div><label>تا تاریخ (اختیاری)</label><input name="to_date" dir="ltr" placeholder="1405/10/30"></div>
+        </div>
+      </div>
+      <div class="once" style="display:none"><label>تاریخ جلسه</label><input name="on_date" dir="ltr" placeholder="1405/08/20"></div>
+      <div class="row">
+        <div><label>ساعت شروع</label><input name="start" dir="ltr" placeholder="10:00" required></div>
+        <div><label>ساعت پایان</label><input name="end" dir="ltr" placeholder="11:30" required></div>
+        <div><label>دستگاه</label><select name="device">{% for d in doors %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></div>
+      </div>
+      <p><button class="btn">افزودن</button></p>
+      <p class="mut">کارت‌زدن از ۱۵ دقیقه قبل از شروع تا ۳۰ دقیقه بعد از پایان برای این کلاس ثبت می‌شود؛ فقط زمان بین شروع و پایان کلاس در مدت حضور حساب می‌شود.</p>
+    </form>
+    <script>function kindChanged(f){const once=f.kind.value==='once';f.querySelector('.once').style.display=once?'':'none';f.querySelector('.weekly').style.display=once?'none':''}</script>
+    {% endif %}
+  </div>
+
+  <div class="box">
+    <h2>اعضای کلاس <span class="mut" style="font-size:14px">({{ n_members|fa }} نفر)</span></h2>
+    {% if cards %}
+    <form method="post" action="{{ url_for('class_members', class_id=cls.id) }}">{{ csrf() }}
+      <input placeholder="جستجو…" oninput="const q=this.value.trim();this.form.querySelectorAll('.m').forEach(e=>e.style.display=e.textContent.includes(q)?'':'none')">
+      <div style="max-height:360px;overflow:auto;margin:8px 0">
+      {% for c in cards %}<label class="check m"><input type="checkbox" name="card" value="{{ c.id }}" {{ 'checked' if c.member }}> {{ c.name }} <span class="mono mut" style="font-size:12px">{{ c.uid }}</span></label>{% endfor %}
+      </div>
+      <button class="btn">ذخیره اعضا</button>
+    </form>
+    {% else %}
+    <p class="mut">ابتدا در صفحهٔ <a href="{{ url_for('cards') }}">کارت‌ها</a> افراد را ثبت کنید.</p>
+    {% endif %}
+  </div>
+
+  <div class="box">
+    <h2>ویرایش کلاس</h2>
+    <form method="post" action="{{ url_for('class_edit', class_id=cls.id) }}">{{ csrf() }}
+      <label>نام</label><input name="name" value="{{ cls.name }}" maxlength="60" required>
+      <label>توضیحات</label><input name="note" value="{{ cls.note }}" maxlength="200">
+      <p><button class="btn">ذخیره</button></p>
+    </form>
+    <form method="post" action="{{ url_for('class_delete', class_id=cls.id) }}" onsubmit="return confirm('کلاس «{{ cls.name }}» حذف شود؟ ترددها باقی می‌مانند ولی دیگر به این کلاس متصل نیستند.')">{{ csrf() }}<button class="btn red sm">حذف کلاس</button></form>
+  </div>
+</div>
+{% endblock %}

@@ -121,11 +121,12 @@ function describe(e) {
   switch (e.result) {
     case 'granted':
       return {kind:'ok', title: e.direction === 'out' ? 'خدانگهدار' : 'خوش آمدید', name: e.name,
-              sub: e.direction === 'in' ? 'ورود ثبت شد' : e.direction === 'out' ? 'خروج ثبت شد' : 'دسترسی مجاز'};
+              sub: (e.direction === 'in' ? 'ورود ثبت شد' : e.direction === 'out' ? 'خروج ثبت شد' : 'دسترسی مجاز') + (e.class ? ' · ' + e.class : '')};
     case 'unknown':  return {kind:'bad', title:'دسترسی رد شد', name:'کارت ناشناس', sub:`شناسه <span class="uid">${esc(e.uid)}</span>`, raw:true};
     case 'disabled': return {kind:'bad', title:'دسترسی رد شد', name:e.name, sub:'این کارت مسدود است'};
     case 'expired':  return {kind:'bad', title:'دسترسی رد شد', name:e.name, sub:'اعتبار این کارت به پایان رسیده است'};
     case 'denied':   return {kind:'bad', title:'دسترسی رد شد', name:e.name || 'کارت', sub:'این در غیرفعال است'};
+    case 'not_member': return {kind:'bad', title:'دسترسی رد شد', name:e.name, sub: e.class ? `عضو کلاس «${esc(e.class)}» نیستید` : 'عضو این کلاس نیستید', raw:true};
     case 'manual':   return {kind:'info', title:'در باز شد', name:e.name, sub:'باز کردن دستی'};
     default:         return {kind:'bad', title:e.result, name:e.name, sub:''};
   }

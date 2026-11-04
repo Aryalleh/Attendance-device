@@ -2,8 +2,9 @@
 // Same device API (/api/v1/*) as the Flask server, so the Wemos firmware works with either.
 import { checkPassword, hashPassword, kioskMatches, kioskPayload, kioskToken, randomToken, safeEqual, Session } from "./auth";
 import {
-  addEvent, all, bumpCardsRev, cardsVersion, cardsWithPresence, cardValid, cleanName, EVENT_SELECT,
-  first, isUniqueError, lastDirection, normalizeUid, Row, run, stmt,
+  activeSlots, addEvent, all, bumpCardsRev, cardsVersion, cardsWithPresence, cardValid, classSessions, classSummary,
+  cleanName, decide, Decision, EARLY_MIN, EVENT_SELECT, first, isMember, isUniqueError, normalizeUid, Row, run,
+  sessionReport, slotOn, stmt,
 } from "./db";
 import { esc, Safe } from "./html";
 import * as J from "./jalali";
@@ -36,6 +37,9 @@ type Ctx = {
   url: URL;
   db: D1Database;
   session: Session;
+  user: Row | null;      // logged-in user
+  owner: boolean;        // server owner (no company of their own)
+  org: Row | null;       // company being viewed
   waitUntil: (p: Promise<unknown>) => void;
   form?: FormData;
   endpoint: string;
@@ -60,8 +64,41 @@ const back = (c: Ctx, fallback: string) => {
 };
 
 function pageCtx(c: Ctx): V.PageCtx {
-  return { user: c.session.user, endpoint: c.endpoint, csrf: c.session.csrfToken(), flashes: c.session.popFlashes() };
+  return {
+    user: c.user?.username, userId: c.user?.id, owner: c.owner, orgName: c.org?.name,
+    endpoint: c.endpoint, csrf: c.session.csrfToken(), flashes: c.session.popFlashes(),
+  };
 }
+
+const oid = (c: Ctx): number => c.org!.id;
+
+/** A row of the current company, or 404 (ids from another company are never served). */
+async function ownRow(c: Ctx, table: "cards" | "devices" | "classes", id: number): Promise<Row> {
+  const row = await first(c.db, `SELECT * FROM ${table} WHERE id = ? AND org_id = ?`, id, oid(c));
+  if (!row) abort(404);
+  return row!;
+}
+
+/** Load the logged-in user and the company they are looking at. */
+async function loadUser(c: Ctx) {
+  const uid = c.session.data.uid;
+  if (!uid) return;
+  const u = await first(c.db, "SELECT u.*, o.enabled AS org_enabled FROM users u LEFT JOIN orgs o ON o.id = u.org_id WHERE u.id = ?", uid);
+  if (!u || (u.org_id && !u.org_enabled)) {
+    c.session.clear();
+    if (u) c.session.flash("حساب سازمان شما غیرفعال شده است.", "error");
+    return;
+  }
+  c.user = u;
+  c.owner = u.org_id === null;
+  const orgId = u.org_id ?? c.session.data.view_org;
+  if (orgId) {
+    c.org = await first(c.db, "SELECT * FROM orgs WHERE id = ?", orgId);
+    if (!c.org) c.session.set("view_org", undefined);
+  }
+}
+
+const validPassword = (pw: string) => pw.length >= 8;
 
 const intArg = (v: string | null | undefined, dflt = 0) => {
   const n = parseInt(v ?? "", 10);
@@ -77,7 +114,8 @@ const formStr = (c: Ctx, k: string) => {
 
 async function deviceFromKey(c: Ctx): Promise<Row> {
   const key = c.req.headers.get("X-Device-Key") || "";
-  const dev = key ? await first(c.db, "SELECT * FROM devices WHERE key = ?", key) : null;
+  const dev = key ? await first(c.db,
+    "SELECT d.*, o.enabled AS org_enabled, o.name AS org_name FROM devices d JOIN orgs o ON o.id = d.org_id WHERE d.key = ?", key) : null;
   if (!dev) throw new HttpError(401, "unknown device key");
   return dev;
 }
@@ -94,10 +132,10 @@ function touchDevice(c: Ctx, dev: Row, fw: string | null = null) {
     now(), c.req.headers.get("CF-Connecting-IP") || "", fw, dev.id);
 }
 
-function eventPayload(ts: number, dev: Row, uid: string, card: Row | null, result: string, direction: string, offline: boolean) {
+function eventPayload(ts: number, dev: Row, uid: string, card: Row | null, d: Decision, offline: boolean) {
   return {
-    ts, time: fmtDt(ts), time_jalali: J.latin(jdt(ts)), door: dev.name, uid,
-    name: card ? card.name : null, result, direction: direction || null, offline,
+    ts, time: fmtDt(ts), time_jalali: J.latin(jdt(ts)), org: dev.org_name, org_id: dev.org_id, door: dev.name, uid,
+    name: card ? card.name : null, result: d.result, direction: d.direction || null, class_id: d.classId, offline,
   };
 }
 
@@ -110,8 +148,8 @@ function fireWebhook(c: Ctx, payload: unknown) {
     .catch((e) => console.warn("webhook failed:", e)));
 }
 
-function eventFilters(args: URLSearchParams): [string, unknown[]] {
-  const where = ["1"], params: unknown[] = [];
+function eventFilters(c: Ctx, args: URLSearchParams): [string, unknown[]] {
+  const where = ["e.org_id = ?"], params: unknown[] = [oid(c)];
   const q = (args.get("q") || "").trim();
   if (q) {
     where.push("(e.name LIKE ? OR e.uid LIKE ?)");
@@ -124,6 +162,10 @@ function eventFilters(args: URLSearchParams): [string, unknown[]] {
   if (args.get("door")) {
     where.push("e.device_id = ?");
     params.push(args.get("door"));
+  }
+  if (args.get("class")) {
+    where.push("e.class_id = ?");
+    params.push(args.get("class"));
   }
   const from = J.parse(args.get("from")), to = J.parse(args.get("to"));
   if (from) {
@@ -145,9 +187,9 @@ async function kioskDoor(c: Ctx, token: string): Promise<Row> {
 }
 
 /** New scans for the live screen. ?init=1 -> the latest few; ?after=<id> -> newer ones. */
-async function liveEvents(c: Ctx, doorId: number) {
-  let where = "e.offline = 0";
-  const params: unknown[] = [];
+async function liveEvents(c: Ctx, orgId: number, doorId: number) {
+  let where = "e.offline = 0 AND e.org_id = ?";
+  const params: unknown[] = [orgId];
   if (doorId) {
     where += " AND e.device_id = ?";
     params.push(doorId);
@@ -160,10 +202,10 @@ async function liveEvents(c: Ctx, doorId: number) {
       ...params, intArg(c.url.searchParams.get("after")));
   }
   const cutoff = now() - ONLINE_WINDOW;
-  const doors = await all(c.db, "SELECT id, name, last_seen FROM devices ORDER BY name");
+  const doors = await all(c.db, "SELECT id, name, last_seen FROM devices WHERE org_id = ? ORDER BY name", orgId);
   return json({
     events: rows.map((r) => ({
-      id: r.id, name: r.name, uid: r.uid, result: r.result, direction: r.direction, door: r.door || "",
+      id: r.id, name: r.name, uid: r.uid, result: r.result, direction: r.direction, door: r.door || "", class: r.class_name || "",
       time: jtime(r.ts, true), date: jdate(r.ts),
     })),
     doors: doors.filter((d) => !doorId || d.id === doorId)
@@ -195,11 +237,11 @@ async function ensureAdmin(c: Ctx): Promise<boolean> {
   const n = await first(c.db, "SELECT COUNT(*) AS n FROM users");
   if (n && n.n > 0) return true;
   if (!c.env.ADMIN_PASSWORD) return false;
-  await run(c.db, "INSERT OR IGNORE INTO users(username, pw_hash) VALUES ('admin', ?)", await hashPassword(c.env.ADMIN_PASSWORD));
+  await run(c.db, "INSERT OR IGNORE INTO users(username, pw_hash, org_id) VALUES ('admin', ?, NULL)", await hashPassword(c.env.ADMIN_PASSWORD));
   return true;
 }
 
-// --- device API (used by the Wemos firmware) ------------------------------------
+// --- device API (used by the Wemos firmware and the Android app) ---------------------
 
 async function apiScan(c: Ctx) {
   const dev = await deviceFromKey(c);
@@ -207,25 +249,15 @@ async function apiScan(c: Ctx) {
   const uid = normalizeUid(body?.uid);
   if (!uid) return json({ error: "invalid uid" }, 400);
 
-  const card = await first(c.db, "SELECT * FROM cards WHERE uid = ?", uid);
-  let direction = "", result: string;
-  if (!dev.enabled) result = "denied";
-  else if (!card) result = "unknown";
-  else {
-    const valid = cardValid(card);
-    result = valid === "ok" ? "granted" : valid;
-  }
-  if (result === "granted") {
-    direction = dev.direction;
-    if (direction === "toggle") direction = (await lastDirection(c.db, card!.id)) === "in" ? "out" : "in";
-  }
+  const card = await first(c.db, "SELECT * FROM cards WHERE org_id = ? AND uid = ?", dev.org_id, uid);
   const ts = now();
+  const d = await decide(c.db, dev, Boolean(dev.org_enabled), card, ts);
   await c.db.batch([
     touchDevice(c, dev),
-    addEvent(c.db, { ts, deviceId: dev.id, uid, card, result, direction }),
+    addEvent(c.db, { orgId: dev.org_id, ts, deviceId: dev.id, uid, card, ...d }),
   ]);
-  fireWebhook(c, eventPayload(ts, dev, uid, card, result, direction, false));
-  return json({ granted: result === "granted", result, name: card ? card.name : "", direction, open_ms: dev.open_ms });
+  fireWebhook(c, eventPayload(ts, dev, uid, card, d, false));
+  return json({ granted: d.result === "granted", result: d.result, name: card ? card.name : "", direction: d.direction, open_ms: dev.open_ms });
 }
 
 async function apiSync(c: Ctx) {
@@ -233,16 +265,26 @@ async function apiSync(c: Ctx) {
   const body: any = await c.req.json().catch(() => ({}));
   const writes = [touchDevice(c, dev, String(body?.fw ?? "").slice(0, 16) || null)];
 
-  // events the device decided on its own while we were unreachable
+  // events the device decided on its own while we were unreachable (Wemos offline fallback)
   for (const ev of Array.isArray(body?.events) ? body.events : []) {
     const uid = normalizeUid(ev?.uid);
     if (!uid) continue;
     const ts = Math.trunc(Number(ev.ts) || 0) || now();   // 0 = device had no clock yet
-    const card = await first(c.db, "SELECT * FROM cards WHERE uid = ?", uid);
+    const card = await first(c.db, "SELECT * FROM cards WHERE org_id = ? AND uid = ?", dev.org_id, uid);
     const result = ["granted", "denied", "unknown"].includes(ev.result) ? ev.result : "denied";
     const direction = ["in", "out"].includes(ev.direction) ? ev.direction : "";
-    writes.push(addEvent(c.db, { ts, deviceId: dev.id, uid, card, result, direction, offline: true }));
-    fireWebhook(c, eventPayload(ts, dev, uid, card, result, direction, true));
+    const d: Decision = { result, direction, classId: null, slotId: null, sessionDate: null };
+    // count it for a class if a member scanned during a session
+    if (card && result === "granted") {
+      for (const x of await activeSlots(c.db, dev.id, ts)) {
+        if (await isMember(c.db, x.classId, card.id)) {
+          Object.assign(d, { classId: x.classId, slotId: x.slotId, sessionDate: x.sessionDate });
+          break;
+        }
+      }
+    }
+    writes.push(addEvent(c.db, { orgId: dev.org_id, ts, deviceId: dev.id, uid, card, offline: true, ...d }));
+    fireWebhook(c, eventPayload(ts, dev, uid, card, d, true));
   }
 
   const openNow = Boolean(dev.pending_open);
@@ -253,9 +295,9 @@ async function apiSync(c: Ctx) {
 
 /** Offline cache for the device: uid \t enabled \t inside \t name, valid cards only. */
 async function apiCards(c: Ctx) {
-  await deviceFromKey(c);
+  const dev = await deviceFromKey(c);
   const day = today();
-  const lines = (await cardsWithPresence(c.db))
+  const lines = !dev.org_enabled ? [] : (await cardsWithPresence(c.db, "c.org_id = ?", dev.org_id))
     .filter((k) => cardValid(k, day) === "ok")
     .map((k) => `${k.uid}\t1\t${k.last_dir === "in" ? 1 : 0}\t${k.name}`);
   return new Response(lines.join("\n") + "\n", { headers: { "Content-Type": "text/tab-separated-values" } });
@@ -267,17 +309,22 @@ async function apiKiosk(c: Ctx) {
   return json({ name: dev.name, url: `/kiosk/${await kioskToken(c.env.SECRET_KEY, dev as { id: number; key: string })}` });
 }
 
-// --- integration API (read-only, Bearer token) -------------------------------------
+// --- integration API (read-only, Bearer token, all companies; ?org=<id> to filter) -----
 
 async function apiPresence(c: Ctx) {
   requireToken(c);
-  const rows = await cardsWithPresence(c.db);
-  return json(rows.map((k) => ({ name: k.name, uid: k.uid, inside: k.last_dir === "in", last_seen: k.last_ts })));
+  const org = intArg(c.url.searchParams.get("org"));
+  const rows = org ? await cardsWithPresence(c.db, "c.org_id = ?", org) : await cardsWithPresence(c.db);
+  return json(rows.map((k) => ({ org_id: k.org_id, name: k.name, uid: k.uid, inside: k.last_dir === "in", last_seen: k.last_ts })));
 }
 
 async function apiEvents(c: Ctx) {
   requireToken(c);
-  const rows = await all(c.db, EVENT_SELECT + "WHERE e.id > ? ORDER BY e.id LIMIT 1000", intArg(c.url.searchParams.get("since")));
+  const since = intArg(c.url.searchParams.get("since"));
+  const org = intArg(c.url.searchParams.get("org"));
+  const rows = org
+    ? await all(c.db, EVENT_SELECT + "WHERE e.id > ? AND e.org_id = ? ORDER BY e.id LIMIT 1000", since, org)
+    : await all(c.db, EVENT_SELECT + "WHERE e.id > ? ORDER BY e.id LIMIT 1000", since);
   return json(rows);
 }
 
@@ -287,12 +334,19 @@ async function login(c: Ctx) {
   if (!(await ensureAdmin(c))) {
     c.session.flash("هنوز کاربری وجود ندارد. secret با نام ADMIN_PASSWORD را تنظیم کنید یا scripts/set-password.mjs را اجرا کنید.", "error");
   } else if (c.req.method === "POST") {
-    const u = await first(c.db, "SELECT * FROM users WHERE username = ?", formStr(c, "username"));
+    const u = await first(c.db, "SELECT u.*, o.enabled AS org_enabled FROM users u LEFT JOIN orgs o ON o.id = u.org_id WHERE u.username = ?",
+      formStr(c, "username"));
     if (u && (await checkPassword(u.pw_hash, formStr(c, "password")))) {
+      if (u.org_id && !u.org_enabled) {
+        c.session.flash("حساب سازمان شما غیرفعال شده است.", "error");
+        return page(V.loginPage(pageCtx(c)));
+      }
       c.session.clear();
+      c.session.set("uid", u.id);
       c.session.set("user", u.username);
       const nxt = c.url.searchParams.get("next") || "";
-      return redirect(nxt.startsWith("/") && !nxt.startsWith("//") ? nxt : "/");
+      if (nxt.startsWith("/") && !nxt.startsWith("//")) return redirect(nxt);
+      return redirect(u.org_id === null ? "/admin" : "/");
     }
     await new Promise((r) => setTimeout(r, 1000));
     c.session.flash("نام کاربری یا رمز عبور اشتباه است.", "error");
@@ -308,14 +362,14 @@ function logout(c: Ctx) {
 // --- live screen ----------------------------------------------------------------------
 
 async function live(c: Ctx) {
-  const doors = await all(c.db, "SELECT id, name FROM devices ORDER BY name");
+  const doors = await all(c.db, "SELECT id, name FROM devices WHERE org_id = ? ORDER BY name", oid(c));
   const doorId = intArg(c.url.searchParams.get("door"));
   return livePage({ kiosk: false, doors, doorId, feedUrl: doorId ? `/live/feed?door=${doorId}` : "/live/feed", pollMs: pollMs(c) });
 }
 
 async function liveFeed(c: Ctx) {
-  if (!c.session.user) return json({ error: "login required" }, 401);
-  return liveEvents(c, intArg(c.url.searchParams.get("door")));
+  if (!c.user || !c.org) return json({ error: "login required" }, 401);
+  return liveEvents(c, oid(c), intArg(c.url.searchParams.get("door")));
 }
 
 async function kiosk(c: Ctx, token: string) {
@@ -324,26 +378,40 @@ async function kiosk(c: Ctx, token: string) {
 }
 
 async function kioskFeed(c: Ctx, token: string) {
-  return liveEvents(c, (await kioskDoor(c, token)).id);
+  const dev = await kioskDoor(c, token);
+  return liveEvents(c, dev.org_id, dev.id);
 }
 
 // --- dashboard -------------------------------------------------------------------------
 
 async function dashboard(c: Ctx) {
   const [start, end] = dayBounds(today());
-  const [cards, stats, recent, unknown, doors] = await Promise.all([
-    cardsWithPresence(c.db),
-    first(c.db, "SELECT SUM(result = 'granted') AS granted, SUM(result != 'granted') AS denied FROM events WHERE ts >= ? AND ts < ?", start, end),
-    all(c.db, EVENT_SELECT + "ORDER BY e.ts DESC, e.id DESC LIMIT 15"),
+  const o = oid(c);
+  const [cards, stats, recent, unknown, doors, classes] = await Promise.all([
+    cardsWithPresence(c.db, "c.org_id = ?", o),
+    first(c.db, "SELECT SUM(result = 'granted') AS granted, SUM(result != 'granted') AS denied FROM events WHERE org_id = ? AND ts >= ? AND ts < ?", o, start, end),
+    all(c.db, EVENT_SELECT + "WHERE e.org_id = ? ORDER BY e.ts DESC, e.id DESC LIMIT 15", o),
     all(c.db,
       `SELECT e.uid, MAX(e.ts) AS ts, COUNT(*) AS n, d.name AS door FROM events e
        LEFT JOIN devices d ON d.id = e.device_id
-       WHERE e.result = 'unknown' AND e.ts > ? AND e.uid NOT IN (SELECT uid FROM cards)
-       GROUP BY e.uid ORDER BY ts DESC LIMIT 10`, now() - 7 * 86400),
-    all(c.db, "SELECT * FROM devices ORDER BY name"),
+       WHERE e.org_id = ? AND e.result = 'unknown' AND e.ts > ? AND e.uid NOT IN (SELECT uid FROM cards WHERE org_id = ?)
+       GROUP BY e.uid ORDER BY ts DESC LIMIT 10`, o, now() - 7 * 86400, o),
+    all(c.db, "SELECT * FROM devices WHERE org_id = ? ORDER BY name", o),
+    all(c.db, "SELECT * FROM classes WHERE org_id = ? ORDER BY name", o),
   ]);
+  // class sessions running right now
+  const running: V.Running[] = [];
+  const t = now(), d = today();
+  for (const k of classes) {
+    for (const s of await classSessions(c.db, k, d, d)) {
+      if (s.start - EARLY_MIN * 60 <= t && t < s.end) {
+        const rep = await sessionReport(c.db, k, s.slot, s.date, t);
+        running.push({ cls: k, s, here: rep.rows.filter((r) => r.open).length, members: rep.rows.length });
+      }
+    }
+  }
   return page(V.dashboardPage(pageCtx(c), {
-    cards, inside: cards.filter((k) => k.last_dir === "in"), stats, recent, unknown, doors, onlineAfter: now() - ONLINE_WINDOW,
+    cards, inside: cards.filter((k) => k.last_dir === "in"), stats, recent, unknown, doors, running, onlineAfter: now() - ONLINE_WINDOW,
   }));
 }
 
@@ -352,8 +420,8 @@ async function dashboard(c: Ctx) {
 async function cardsList(c: Ctx) {
   const q = (c.url.searchParams.get("q") || "").trim();
   const rows = q
-    ? await cardsWithPresence(c.db, "c.name LIKE ? OR c.uid LIKE ? OR c.note LIKE ?", `%${q}%`, `%${q}%`, `%${q}%`)
-    : await cardsWithPresence(c.db);
+    ? await cardsWithPresence(c.db, "c.org_id = ? AND (c.name LIKE ? OR c.uid LIKE ? OR c.note LIKE ?)", oid(c), `%${q}%`, `%${q}%`, `%${q}%`)
+    : await cardsWithPresence(c.db, "c.org_id = ?", oid(c));
   return page(V.cardsPage(pageCtx(c), { cards: rows, q, today: today() }));
 }
 
@@ -382,15 +450,16 @@ async function saveCard(c: Ctx, cardId: number | null): Promise<boolean> {
     c.session.flash("تاریخ اعتبار نامعتبر است (مثال: 1405/12/29).", "error");
     return false;
   }
-  const clash = await first(c.db, "SELECT id, name FROM cards WHERE uid = ? AND id IS NOT ?", uid, cardId);
+  const clash = await first(c.db, "SELECT id, name FROM cards WHERE org_id = ? AND uid = ? AND id IS NOT ?", oid(c), uid, cardId);
   if (clash) {
     c.session.flash(`این کارت قبلاً برای «${clash.name}» ثبت شده است.`, "error");
     return false;
   }
   const write = cardId
-    ? stmt(c.db, "UPDATE cards SET uid=?, name=?, note=?, enabled=?, valid_until=? WHERE id=?", uid, name, note, enabled, validUntil, cardId)
-    : stmt(c.db, "INSERT INTO cards(uid, name, note, enabled, valid_until, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-      uid, name, note, enabled, validUntil, now());
+    ? stmt(c.db, "UPDATE cards SET uid=?, name=?, note=?, enabled=?, valid_until=? WHERE id=? AND org_id=?",
+      uid, name, note, enabled, validUntil, cardId, oid(c))
+    : stmt(c.db, "INSERT INTO cards(org_id, uid, name, note, enabled, valid_until, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      oid(c), uid, name, note, enabled, validUntil, now());
   await c.db.batch([write, bumpCardsRev(c.db)]);
   c.session.flash(`«${name}» ذخیره شد.`, "ok");
   return true;
@@ -403,22 +472,26 @@ async function cardNew(c: Ctx) {
 }
 
 async function cardEdit(c: Ctx, id: number) {
-  let card = await first(c.db, "SELECT * FROM cards WHERE id = ?", id);
-  if (!card) abort(404);
+  let card = await ownRow(c, "cards", id);
   if (c.req.method === "POST") {
     if (await saveCard(c, id)) return redirect("/cards");
     card = formAsRow(c);
   }
-  const history = await all(c.db, EVENT_SELECT + "WHERE e.card_id = ? ORDER BY e.ts DESC LIMIT 30", id);
-  return page(V.cardFormPage(pageCtx(c), { card: card!, isNew: false, cardId: id, history }));
+  const [history, classes] = await Promise.all([
+    all(c.db, EVENT_SELECT + "WHERE e.card_id = ? ORDER BY e.ts DESC LIMIT 30", id),
+    all(c.db, "SELECT k.* FROM classes k JOIN class_members m ON m.class_id = k.id WHERE m.card_id = ? ORDER BY k.name", id),
+  ]);
+  return page(V.cardFormPage(pageCtx(c), { card, isNew: false, cardId: id, history, classes }));
 }
 
 async function cardToggle(c: Ctx, id: number) {
+  await ownRow(c, "cards", id);
   await c.db.batch([stmt(c.db, "UPDATE cards SET enabled = 1 - enabled WHERE id = ?", id), bumpCardsRev(c.db)]);
   return back(c, "/cards");
 }
 
 async function cardDelete(c: Ctx, id: number) {
+  await ownRow(c, "cards", id);
   await c.db.batch([stmt(c.db, "DELETE FROM cards WHERE id = ?", id), bumpCardsRev(c.db)]);
   c.session.flash("کارت حذف شد. سوابق تردد آن حفظ می‌شود.", "ok");
   return redirect("/cards");
@@ -427,7 +500,7 @@ async function cardDelete(c: Ctx, id: number) {
 // --- doors (devices) ------------------------------------------------------------------------
 
 async function doors(c: Ctx) {
-  const rows = await all(c.db, "SELECT * FROM devices ORDER BY name");
+  const rows = await all(c.db, "SELECT * FROM devices WHERE org_id = ? ORDER BY name", oid(c));
   const kioskLinks: Record<number, string> = {};
   for (const d of rows) kioskLinks[d.id] = `/kiosk/${await kioskToken(c.env.SECRET_KEY, d as { id: number; key: string })}`;
   return page(V.doorsPage(pageCtx(c), {
@@ -453,7 +526,8 @@ async function doorNew(c: Ctx) {
   }
   const key = randomToken(18);
   try {
-    await run(c.db, "INSERT INTO devices(name, key, direction, open_ms, enabled) VALUES (?, ?, ?, ?, 1)", v.name, key, v.direction, v.open_ms);
+    await run(c.db, "INSERT INTO devices(org_id, name, key, direction, open_ms, enabled) VALUES (?, ?, ?, ?, ?, 1)",
+      oid(c), v.name, key, v.direction, v.open_ms);
   } catch (e) {
     if (!isUniqueError(e)) throw e;
     c.session.flash("دری با این نام وجود دارد.", "error");
@@ -464,6 +538,7 @@ async function doorNew(c: Ctx) {
 }
 
 async function doorEdit(c: Ctx, id: number) {
+  await ownRow(c, "devices", id);
   const v = doorFormValues(c);
   try {
     await run(c.db, "UPDATE devices SET name=?, direction=?, open_ms=?, enabled=? WHERE id=?", v.name, v.direction, v.open_ms, v.enabled, id);
@@ -476,46 +551,211 @@ async function doorEdit(c: Ctx, id: number) {
 }
 
 async function doorOpen(c: Ctx, id: number) {
-  const dev = await first(c.db, "SELECT * FROM devices WHERE id = ?", id);
-  if (!dev) abort(404);
+  const dev = await ownRow(c, "devices", id);
   await c.db.batch([
     stmt(c.db, "UPDATE devices SET pending_open = 1 WHERE id = ?", id),
-    stmt(c.db, "INSERT INTO events(ts, device_id, uid, name, result) VALUES (?, ?, '-', ?, 'manual')", now(), id, `پنل: ${c.session.user}`),
+    stmt(c.db, "INSERT INTO events(org_id, ts, device_id, uid, name, result) VALUES (?, ?, ?, '-', ?, 'manual')",
+      oid(c), now(), id, `پنل: ${c.user!.username}`),
   ]);
-  c.session.flash(`«${dev!.name}» تا چند ثانیه دیگر باز می‌شود.`, "ok");
+  c.session.flash(`«${dev.name}» تا چند ثانیه دیگر باز می‌شود.`, "ok");
   return back(c, "/doors");
 }
 
 async function doorRekey(c: Ctx, id: number) {
-  const dev = await first(c.db, "SELECT * FROM devices WHERE id = ?", id);
-  if (!dev) abort(404);
+  const dev = await ownRow(c, "devices", id);
   const key = randomToken(18);
   await run(c.db, "UPDATE devices SET key = ? WHERE id = ?", key, id);
-  c.session.set("new_key", { name: dev!.name, key });
+  c.session.set("new_key", { name: dev.name, key });
   return redirect("/doors");
 }
 
 async function doorDelete(c: Ctx, id: number) {
+  await ownRow(c, "devices", id);
   await run(c.db, "DELETE FROM devices WHERE id = ?", id);
-  c.session.flash("در حذف شد. سوابق تردد آن حفظ می‌شود.", "ok");
+  c.session.flash("در حذف شد. سوابق تردد آن حفظ می‌شود؛ زمان‌بندی کلاس‌های این در حذف شد.", "ok");
   return redirect("/doors");
+}
+
+// --- classes ------------------------------------------------------------------------------
+
+async function classesList(c: Ctx) {
+  if (c.req.method === "POST") {
+    const name = cleanName(formStr(c, "name"), 60);
+    if (!name) {
+      c.session.flash("نام کلاس الزامی است.", "error");
+    } else {
+      try {
+        const r = await run(c.db, "INSERT INTO classes(org_id, name, note, created_at) VALUES (?, ?, ?, ?)",
+          oid(c), name, Array.from(formStr(c, "note").trim()).slice(0, 200).join(""), now());
+        return redirect(`/classes/${r.meta.last_row_id}`);
+      } catch (e) {
+        if (!isUniqueError(e)) throw e;
+        c.session.flash("کلاسی با این نام وجود دارد.", "error");
+      }
+    }
+    return redirect("/classes");
+  }
+  const [rows, slots] = await Promise.all([
+    all(c.db,
+      `SELECT k.*, (SELECT COUNT(*) FROM class_members m WHERE m.class_id = k.id) AS members
+       FROM classes k WHERE k.org_id = ? ORDER BY k.name COLLATE NOCASE`, oid(c)),
+    all(c.db,
+      `SELECT s.*, d.name AS door FROM class_slots s JOIN classes k ON k.id = s.class_id
+       LEFT JOIN devices d ON d.id = s.device_id WHERE k.org_id = ? ORDER BY s.on_date, s.weekday, s.start_min`, oid(c)),
+  ]);
+  const byClass = new Map<number, Row[]>();
+  for (const s of slots) byClass.set(s.class_id, [...(byClass.get(s.class_id) || []), s]);
+  return page(V.classesPage(pageCtx(c), { classes: rows, slots: byClass }));
+}
+
+function rangeArgs(c: Ctx): [string, string] {
+  const last = J.parse(c.url.searchParams.get("to")) || today();
+  const firstDay = J.parse(c.url.searchParams.get("from")) || J.addDays(last, -29);
+  return firstDay <= last ? [firstDay, last] : [last, firstDay];
+}
+
+async function classView(c: Ctx, id: number) {
+  const cls = await ownRow(c, "classes", id);
+  const [firstDay, last] = rangeArgs(c);
+  const sessions = await classSessions(c.db, cls, firstDay, last);
+  const [[summary, counts], slots, cards, doorList] = await Promise.all([
+    classSummary(c.db, cls, sessions),
+    all(c.db, "SELECT s.*, d.name AS door FROM class_slots s LEFT JOIN devices d ON d.id = s.device_id WHERE s.class_id = ? ORDER BY s.on_date, s.weekday, s.start_min", id),
+    all(c.db,
+      `SELECT c.*, EXISTS(SELECT 1 FROM class_members m WHERE m.class_id = ? AND m.card_id = c.id) AS member
+       FROM cards c WHERE c.org_id = ? ORDER BY c.name COLLATE NOCASE`, id, oid(c)),
+    all(c.db, "SELECT id, name FROM devices WHERE org_id = ? ORDER BY name", oid(c)),
+  ]);
+  return page(V.classPage(pageCtx(c), {
+    cls, sessions: sessions.map((s, i) => [s, counts[i]]), summary, slots, cards, doors: doorList,
+    first: firstDay, last, nMembers: cards.filter((k) => k.member).length,
+  }));
+}
+
+async function classCsv(c: Ctx, id: number) {
+  const cls = await ownRow(c, "classes", id);
+  const [firstDay, last] = rangeArgs(c);
+  const sessions = await classSessions(c.db, cls, firstDay, last);
+  const [summary] = await classSummary(c.db, cls, sessions);
+  const lines: unknown[][] = [
+    ["کلاس", "از", "تا", "تعداد جلسات"], [cls.name, J.jstr(firstDay), J.jstr(last), sessions.length], [],
+    ["نام", "شناسه کارت", "جلسات حاضر", "مجموع حضور (دقیقه)", "درصد حضور"],
+    ...summary.map((t) => [t.card.name, t.card.uid, t.attended, Math.floor(t.secs / 60), t.pct]),
+  ];
+  const body = "﻿" + lines.map((l) => l.map(csvCell).join(",")).join("\r\n") + "\r\n";
+  return new Response(body, {
+    headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename=class-${id}.csv` },
+  });
+}
+
+async function classEdit(c: Ctx, id: number) {
+  await ownRow(c, "classes", id);
+  const name = cleanName(formStr(c, "name"), 60);
+  if (!name) c.session.flash("نام کلاس الزامی است.", "error");
+  else {
+    try {
+      await run(c.db, "UPDATE classes SET name = ?, note = ? WHERE id = ?", name, Array.from(formStr(c, "note").trim()).slice(0, 200).join(""), id);
+      c.session.flash("ذخیره شد.", "ok");
+    } catch (e) {
+      if (!isUniqueError(e)) throw e;
+      c.session.flash("کلاسی با این نام وجود دارد.", "error");
+    }
+  }
+  return redirect(`/classes/${id}`);
+}
+
+async function classMembers(c: Ctx, id: number) {
+  await ownRow(c, "classes", id);
+  const chosen = new Set((c.form?.getAll("card") || []).map((x) => intArg(String(x))).filter((x) => x > 0));
+  const valid = (await all(c.db, "SELECT id FROM cards WHERE org_id = ?", oid(c))).map((r) => r.id as number).filter((x) => chosen.has(x));
+  await c.db.batch([
+    stmt(c.db, "DELETE FROM class_members WHERE class_id = ?", id),
+    ...valid.map((cardId) => stmt(c.db, "INSERT INTO class_members(class_id, card_id) VALUES (?, ?)", id, cardId)),
+  ]);
+  c.session.flash(`اعضای کلاس ذخیره شد (${J.fa(valid.length)} نفر).`, "ok");
+  return redirect(`/classes/${id}`);
+}
+
+/** '10:30' / '۱۰:۳۰' / '9' -> minutes after midnight, or null. */
+function parseHm(s: string): number | null {
+  const m = J.latin(s.trim()).replace(/[٫.]/g, ":").match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2] || 0);
+  return h < 24 && mi < 60 ? h * 60 + mi : null;
+}
+
+async function classSlotAdd(c: Ctx, id: number) {
+  await ownRow(c, "classes", id);
+  const dev = await first(c.db, "SELECT id FROM devices WHERE id = ? AND org_id = ?", intArg(formStr(c, "device")), oid(c));
+  const start = parseHm(formStr(c, "start")), end = parseHm(formStr(c, "end"));
+  const kind = formStr(c, "kind");
+  let err = "";
+  let rows: unknown[][] = [];
+  if (!dev) err = "دستگاه را انتخاب کنید.";
+  else if (start === null || end === null || end <= start) err = "ساعت شروع و پایان را درست وارد کنید (مثال ۱۰:۳۰ تا ۱۲:۰۰؛ پایان بعد از شروع).";
+  else if (kind === "once") {
+    const d = J.parse(formStr(c, "on_date"));
+    if (!d) err = "تاریخ جلسه را وارد کنید (مثال ۱۴۰۵/۰۸/۲۰).";
+    else rows = [[null, d, null, null]];
+  } else {
+    const days = (c.form?.getAll("weekday") || []).map((x) => intArg(String(x), -1)).filter((x) => x >= 0 && x <= 6);
+    const fromRaw = formStr(c, "from_date"), toRaw = formStr(c, "to_date");
+    const fd = J.parse(fromRaw), td = J.parse(toRaw);
+    if (!days.length) err = "حداقل یک روز هفته را انتخاب کنید.";
+    else if ((fromRaw && !fd) || (toRaw && !td)) err = "تاریخ شروع یا پایان دوره نامعتبر است.";
+    // without a start date the schedule starts today (no sessions before the class existed)
+    else rows = days.map((w) => [w, null, fd || today(), td]);
+  }
+  if (err) {
+    c.session.flash(err, "error");
+    return redirect(`/classes/${id}`);
+  }
+  await c.db.batch(rows.map(([w, onDate, fromDate, toDate]) => stmt(c.db,
+    `INSERT INTO class_slots(class_id, device_id, weekday, on_date, start_min, end_min, from_date, to_date)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, id, dev!.id, w, onDate, start, end, fromDate, toDate)));
+  c.session.flash("زمان‌بندی اضافه شد.", "ok");
+  return redirect(`/classes/${id}`);
+}
+
+async function classSlotDelete(c: Ctx, id: number, slotId: number) {
+  await ownRow(c, "classes", id);
+  await run(c.db, "DELETE FROM class_slots WHERE id = ? AND class_id = ?", slotId, id);
+  c.session.flash("زمان‌بندی حذف شد. ترددهای ثبت‌شده باقی می‌مانند.", "ok");
+  return redirect(`/classes/${id}`);
+}
+
+async function classDelete(c: Ctx, id: number) {
+  const cls = await ownRow(c, "classes", id);
+  await run(c.db, "DELETE FROM classes WHERE id = ?", id);
+  c.session.flash(`کلاس «${cls.name}» حذف شد.`, "ok");
+  return redirect("/classes");
+}
+
+async function classSession(c: Ctx, id: number, slotId: number, day: string) {
+  const cls = await ownRow(c, "classes", id);
+  const slot = await first(c.db, "SELECT s.*, d.name AS door FROM class_slots s LEFT JOIN devices d ON d.id = s.device_id WHERE s.id = ? AND s.class_id = ?", slotId, id);
+  if (!slot || !/^\d{4}-\d{2}-\d{2}$/.test(day) || !slotOn(slot, day)) abort(404);
+  const t = now();
+  const rep = await sessionReport(c.db, cls, slot!, day, t);
+  return page(V.classSessionPage(pageCtx(c), { cls, slot: slot!, day, now: t, rep }));
 }
 
 // --- events / reports ----------------------------------------------------------------------
 
 async function events(c: Ctx) {
-  const [where, params] = eventFilters(c.url.searchParams);
+  const [where, params] = eventFilters(c, c.url.searchParams);
   const pageNo = Math.max(1, intArg(c.url.searchParams.get("page"), 1));
-  const [total, rows, doorList] = await Promise.all([
+  const [total, rows, doorList, classList] = await Promise.all([
     first(c.db, `SELECT COUNT(*) AS n FROM events e WHERE ${where}`, ...params),
     all(c.db, EVENT_SELECT + `WHERE ${where} ORDER BY e.ts DESC, e.id DESC LIMIT ? OFFSET ?`, ...params, PAGE_SIZE, (pageNo - 1) * PAGE_SIZE),
-    all(c.db, "SELECT id, name FROM devices ORDER BY name"),
+    all(c.db, "SELECT id, name FROM devices WHERE org_id = ? ORDER BY name", oid(c)),
+    all(c.db, "SELECT id, name FROM classes WHERE org_id = ? ORDER BY name", oid(c)),
   ]);
   const args: Record<string, string> = {};
   c.url.searchParams.forEach((v, k) => { if (k !== "page") args[k] = v; });
   const n = total?.n || 0;
   return page(V.eventsPage(pageCtx(c), {
-    rows, total: n, page: pageNo, pages: Math.max(1, Math.ceil(n / PAGE_SIZE)), doors: doorList, args,
+    rows, total: n, page: pageNo, pages: Math.max(1, Math.ceil(n / PAGE_SIZE)), doors: doorList, classes: classList, args,
   }));
 }
 
@@ -525,12 +765,12 @@ const csvCell = (v: unknown) => {
 };
 
 async function eventsCsv(c: Ctx) {
-  const [where, params] = eventFilters(c.url.searchParams);
+  const [where, params] = eventFilters(c, c.url.searchParams);
   const rows = await all(c.db, EVENT_SELECT + `WHERE ${where} ORDER BY e.ts`, ...params);
-  const lines = [["تاریخ", "ساعت", "نام", "شناسه کارت", "در", "نتیجه", "جهت", "آفلاین", "تاریخ میلادی"]];
+  const lines = [["تاریخ", "ساعت", "نام", "شناسه کارت", "در", "کلاس", "نتیجه", "جهت", "آفلاین", "تاریخ میلادی"]];
   for (const r of rows) {
     const day = localDate(r.ts);
-    lines.push([J.jstr(day), fmtDt(r.ts).slice(11), r.name, r.uid, r.door || "",
+    lines.push([J.jstr(day), fmtDt(r.ts).slice(11), r.name, r.uid, r.door || "", r.class_name || "",
       V.RESULT_FA[r.result] || r.result, V.DIR_FA[r.direction] || "", r.offline ? "بله" : "", day]);
   }
   // BOM so Excel shows Persian text correctly
@@ -549,70 +789,167 @@ async function attendance(c: Ctx) {
        MAX(CASE WHEN e.direction = 'out' THEN e.ts END) AS last_out,
        MIN(e.ts) AS first_seen, MAX(e.ts) AS last_seen, COUNT(*) AS scans
      FROM events e JOIN cards c ON c.id = e.card_id
-     WHERE e.result = 'granted' AND e.ts >= ? AND e.ts < ?
-     GROUP BY c.id ORDER BY first_seen`, start, end);
+     WHERE e.org_id = ? AND e.result = 'granted' AND e.ts >= ? AND e.ts < ?
+     GROUP BY c.id ORDER BY first_seen`, oid(c), start, end);
   return page(V.attendancePage(pageCtx(c), { rows, day, prev: J.addDays(day, -1), next: J.addDays(day, 1) }));
 }
 
-// --- settings ---------------------------------------------------------------------------------
+// --- settings (per company) -------------------------------------------------------------
+
+async function changeOwnPassword(c: Ctx) {
+  const pw = formStr(c, "new");
+  if (!(await checkPassword(c.user!.pw_hash, formStr(c, "current")))) c.session.flash("رمز فعلی اشتباه است.", "error");
+  else if (!validPassword(pw)) c.session.flash("رمز جدید باید حداقل ۸ کاراکتر باشد.", "error");
+  else {
+    await run(c.db, "UPDATE users SET pw_hash = ? WHERE id = ?", await hashPassword(pw), c.user!.id);
+    c.session.flash("رمز عبور تغییر کرد.", "ok");
+  }
+}
+
+async function addUser(c: Ctx, orgId: number | null): Promise<boolean> {
+  const name = formStr(c, "username").trim(), pw = formStr(c, "password");
+  if (!name || !validPassword(pw)) {
+    c.session.flash("نام کاربری و رمز حداقل ۸ کاراکتری الزامی است.", "error");
+    return false;
+  }
+  try {
+    await run(c.db, "INSERT INTO users(username, pw_hash, org_id) VALUES (?, ?, ?)", name, await hashPassword(pw), orgId);
+    c.session.flash(`کاربر «${name}» اضافه شد.`, "ok");
+    return true;
+  } catch (e) {
+    if (!isUniqueError(e)) throw e;
+    c.session.flash("این نام کاربری قبلاً استفاده شده است.", "error");
+    return false;
+  }
+}
 
 async function settings(c: Ctx) {
   if (c.req.method === "POST") {
     const action = formStr(c, "action");
-    if (action === "password") {
-      const u = await first(c.db, "SELECT * FROM users WHERE username = ?", c.session.user);
-      const pw = formStr(c, "new");
-      if (!u || !(await checkPassword(u.pw_hash, formStr(c, "current")))) c.session.flash("رمز فعلی اشتباه است.", "error");
-      else if (pw.length < 8) c.session.flash("رمز جدید باید حداقل ۸ کاراکتر باشد.", "error");
+    if (action === "password") await changeOwnPassword(c);
+    else if (action === "add_user") await addUser(c, oid(c));
+    else if (action === "del_user") {
+      const id = intArg(formStr(c, "id"));
+      const n = await first(c.db, "SELECT COUNT(*) AS n FROM users WHERE org_id = ?", oid(c));
+      if ((n?.n || 0) <= 1 && !c.owner) c.session.flash("آخرین کاربر سازمان قابل حذف نیست.", "error");
+      else if (id === c.user!.id) c.session.flash("کاربر فعلی را نمی‌توانید حذف کنید.", "error");
       else {
-        await run(c.db, "UPDATE users SET pw_hash = ? WHERE id = ?", await hashPassword(pw), u.id);
-        c.session.flash("رمز عبور تغییر کرد.", "ok");
-      }
-    } else if (action === "add_user") {
-      const name = formStr(c, "username").trim(), pw = formStr(c, "password");
-      if (!name || pw.length < 8) c.session.flash("نام کاربری و رمز حداقل ۸ کاراکتری الزامی است.", "error");
-      else {
-        try {
-          await run(c.db, "INSERT INTO users(username, pw_hash) VALUES (?, ?)", name, await hashPassword(pw));
-          c.session.flash(`کاربر «${name}» اضافه شد.`, "ok");
-        } catch (e) {
-          if (!isUniqueError(e)) throw e;
-          c.session.flash("این نام کاربری وجود دارد.", "error");
-        }
-      }
-    } else if (action === "del_user") {
-      const n = await first(c.db, "SELECT COUNT(*) AS n FROM users");
-      if ((n?.n || 0) <= 1) c.session.flash("آخرین کاربر قابل حذف نیست.", "error");
-      else {
-        await run(c.db, "DELETE FROM users WHERE id = ?", intArg(formStr(c, "id")));
-        if (!(await first(c.db, "SELECT 1 FROM users WHERE username = ?", c.session.user))) {
-          c.session.clear();
-          return redirect("/login");
-        }
+        await run(c.db, "DELETE FROM users WHERE id = ? AND org_id = ?", id, oid(c));
         c.session.flash("کاربر حذف شد.", "ok");
       }
     } else if (action === "purge") {
       const days = intArg(formStr(c, "days"));
       if (days >= 1) {
-        const r = await run(c.db, "DELETE FROM events WHERE ts < ?", now() - days * 86400);
+        const r = await run(c.db, "DELETE FROM events WHERE org_id = ? AND ts < ?", oid(c), now() - days * 86400);
         c.session.flash(`${J.fa(r.meta.changes)} رویداد قدیمی‌تر از ${J.fa(days)} روز حذف شد.`, "ok");
       }
     }
     return redirect("/settings");
   }
   const [users, n] = await Promise.all([
-    all(c.db, "SELECT id, username FROM users ORDER BY username"),
-    first(c.db, "SELECT COUNT(*) AS n FROM events"),
+    all(c.db, "SELECT id, username FROM users WHERE org_id = ? ORDER BY username", oid(c)),
+    first(c.db, "SELECT COUNT(*) AS n FROM events WHERE org_id = ?", oid(c)),
   ]);
-  return page(V.settingsPage(pageCtx(c), {
-    users, nEvents: n?.n || 0, apiEnabled: Boolean(c.env.ACCESSCTL_API_TOKEN), webhook: c.env.ACCESSCTL_WEBHOOK_URL || "",
+  return page(V.settingsPage(pageCtx(c), { users, nEvents: n?.n || 0 }));
+}
+
+// --- server owner: companies and their users ----------------------------------------------
+
+async function admin(c: Ctx) {
+  if (c.req.method === "POST") {
+    const action = formStr(c, "action");
+    const orgId = intArg(formStr(c, "org"));
+    if (action === "new_org") {
+      const name = cleanName(formStr(c, "name"), 60);
+      const username = formStr(c, "username").trim();
+      if (!name) c.session.flash("نام سازمان الزامی است.", "error");
+      else if (!username || !validPassword(formStr(c, "password"))) c.session.flash("برای سازمان یک نام کاربری و رمز حداقل ۸ کاراکتری وارد کنید.", "error");
+      else if (await first(c.db, "SELECT 1 AS x FROM users WHERE username = ?", username)) c.session.flash("این نام کاربری قبلاً استفاده شده است.", "error");
+      else {
+        try {
+          const r = await run(c.db, "INSERT INTO orgs(name, enabled, created_at) VALUES (?, 1, ?)", name, now());
+          if (await addUser(c, r.meta.last_row_id)) c.session.flash(`سازمان «${name}» ساخته شد.`, "ok");
+        } catch (e) {
+          if (!isUniqueError(e)) throw e;
+          c.session.flash("سازمانی با این نام وجود دارد.", "error");
+        }
+      }
+    } else if (action === "rename") {
+      const name = cleanName(formStr(c, "name"), 60);
+      try {
+        if (name) await run(c.db, "UPDATE orgs SET name = ? WHERE id = ?", name, orgId);
+      } catch (e) {
+        if (!isUniqueError(e)) throw e;
+        c.session.flash("سازمانی با این نام وجود دارد.", "error");
+      }
+    } else if (action === "toggle") {
+      await run(c.db, "UPDATE orgs SET enabled = 1 - enabled WHERE id = ?", orgId);
+    } else if (action === "delete") {
+      const org = await first(c.db, "SELECT * FROM orgs WHERE id = ?", orgId);
+      if (org && formStr(c, "confirm").trim() === org.name) {
+        await run(c.db, "DELETE FROM orgs WHERE id = ?", orgId);
+        if (c.session.data.view_org === orgId) c.session.set("view_org", undefined);
+        c.session.flash(`سازمان «${org.name}» و همه داده‌های آن حذف شد.`, "ok");
+      } else c.session.flash("برای حذف، نام سازمان را دقیقاً وارد کنید.", "error");
+    } else if (action === "add_user") {
+      if (await first(c.db, "SELECT 1 AS x FROM orgs WHERE id = ?", orgId)) await addUser(c, orgId);
+    } else if (action === "add_owner") {
+      await addUser(c, null);
+    } else if (action === "reset_pw") {
+      const pw = formStr(c, "password");
+      if (!validPassword(pw)) c.session.flash("رمز باید حداقل ۸ کاراکتر باشد.", "error");
+      else {
+        await run(c.db, "UPDATE users SET pw_hash = ? WHERE id = ?", await hashPassword(pw), intArg(formStr(c, "id")));
+        c.session.flash("رمز عبور تغییر کرد.", "ok");
+      }
+    } else if (action === "del_user") {
+      const id = intArg(formStr(c, "id"));
+      const u = await first(c.db, "SELECT * FROM users WHERE id = ?", id);
+      const owners = await first(c.db, "SELECT COUNT(*) AS n FROM users WHERE org_id IS NULL");
+      if (!u || id === c.user!.id) c.session.flash("کاربر فعلی را نمی‌توانید حذف کنید.", "error");
+      else if (u.org_id === null && (owners?.n || 0) <= 1) c.session.flash("آخرین مدیر سرور قابل حذف نیست.", "error");
+      else {
+        await run(c.db, "DELETE FROM users WHERE id = ?", id);
+        c.session.flash(`کاربر «${u.username}» حذف شد.`, "ok");
+      }
+    } else if (action === "password") {
+      await changeOwnPassword(c);
+    }
+    return redirect("/admin");
+  }
+  const [orgs, users] = await Promise.all([
+    all(c.db,
+      `SELECT o.*,
+         (SELECT COUNT(*) FROM devices WHERE org_id = o.id) AS n_devices,
+         (SELECT COUNT(*) FROM cards WHERE org_id = o.id) AS n_cards,
+         (SELECT COUNT(*) FROM classes WHERE org_id = o.id) AS n_classes,
+         (SELECT MAX(ts) FROM events WHERE org_id = o.id) AS last_event
+       FROM orgs o ORDER BY o.name COLLATE NOCASE`),
+    all(c.db, "SELECT id, username, org_id FROM users ORDER BY username"),
+  ]);
+  const byOrg = new Map<number | null, Row[]>();
+  for (const u of users) byOrg.set(u.org_id, [...(byOrg.get(u.org_id) || []), u]);
+  return page(V.adminPage(pageCtx(c), {
+    orgs, users: byOrg, apiEnabled: Boolean(c.env.ACCESSCTL_API_TOKEN), webhook: c.env.ACCESSCTL_WEBHOOK_URL || "",
   }));
+}
+
+/** Open a company's panel as the server owner. */
+async function adminView(c: Ctx) {
+  const orgId = intArg(formStr(c, "org"));
+  if (orgId && (await first(c.db, "SELECT 1 AS x FROM orgs WHERE id = ?", orgId))) {
+    c.session.set("view_org", orgId);
+    return redirect("/dashboard");
+  }
+  c.session.set("view_org", undefined);
+  return redirect("/admin");
 }
 
 // --- router -----------------------------------------------------------------------------------
 
 type Handler = (c: Ctx, ...params: any[]) => Promise<Response> | Response;
-type Route = { method: string; pattern: RegExp; endpoint: string; handler: Handler; auth: "login" | "none" };
+// login = a company page (owners must pick a company first), owner = server-owner pages
+type Route = { method: string; pattern: RegExp; endpoint: string; handler: Handler; auth: "login" | "owner" | "none" };
 
 const routes: Route[] = [];
 function route(method: string, path: string, endpoint: string, handler: Handler, auth: Route["auth"] = "login") {
@@ -648,7 +985,18 @@ route("POST", "/doors/:int/delete", "door_delete", doorDelete);
 route("GET", "/events", "events", events);
 route("GET", "/events.csv", "events_csv", eventsCsv);
 route("GET", "/attendance", "attendance", attendance);
+route("GET,POST", "/classes", "classes", classesList);
+route("GET", "/classes/:int", "class_view", classView);
+route("GET", "/classes/:int/summary.csv", "class_csv", classCsv);
+route("POST", "/classes/:int/edit", "class_edit", classEdit);
+route("POST", "/classes/:int/members", "class_members", classMembers);
+route("POST", "/classes/:int/slots", "class_slot_add", classSlotAdd);
+route("POST", "/classes/:int/slots/:int/delete", "class_slot_delete", classSlotDelete);
+route("POST", "/classes/:int/delete", "class_delete", classDelete);
+route("GET", "/classes/:int/session/:int/:token", "class_session", classSession);
 route("GET,POST", "/settings", "settings", settings);
+route("GET,POST", "/admin", "admin", admin, "owner");
+route("POST", "/admin/view", "admin_view", adminView, "owner");
 
 async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(req.url);
@@ -679,7 +1027,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   }
 
   const session = isApi ? new Session({}, env.SECRET_KEY) : await Session.load(req, env.SECRET_KEY);
-  const c: Ctx = { req, env, url, db: env.DB, session, waitUntil: (p) => ctx.waitUntil(p), endpoint: r.endpoint };
+  const c: Ctx = {
+    req, env, url, db: env.DB, session, user: null, owner: false, org: null,
+    waitUntil: (p) => ctx.waitUntil(p), endpoint: r.endpoint,
+  };
 
   let res: Response;
   try {
@@ -690,8 +1041,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         abort(400, "نشست منقضی شده است — صفحه را دوباره بارگذاری کنید.");
       }
     }
-    if (r.auth === "login" && !session.user) {
+    if (!isApi && !url.pathname.startsWith("/kiosk/")) await loadUser(c);
+    if (r.auth !== "none" && !c.user) {
       res = redirect(`/login?next=${encodeURIComponent(url.pathname)}`);
+    } else if (r.auth === "login" && !c.org) {
+      res = redirect("/admin");
+    } else if (r.auth === "owner" && !c.owner) {
+      res = page(V.errorPage(403, "این صفحه فقط برای مدیر سرور است."), 403);
     } else {
       const params = match.slice(1).map((p) => (/^\d+$/.test(p) ? Number(p) : decodeURIComponent(p)));
       res = await r.handler(c, ...params);

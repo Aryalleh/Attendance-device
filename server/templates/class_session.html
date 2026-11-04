@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "_macros.html" import events_table %}
+{% block title %}{{ cls.name }} · جلسه{% endblock %}
+{% block body %}
+<div class="row" style="margin-bottom:12px">
+  <h1>{{ cls.name }} — {{ WEEKDAYS_FA[day.weekday()] }} {{ day|jstr|fa }}</h1>
+  <a class="btn sec auto" href="{{ url_for('class_view', class_id=cls.id) }}">بازگشت به کلاس</a>
+</div>
+<p class="mut">ساعت {{ slot.start_min|hm }} تا {{ slot.end_min|hm }} · دستگاه: {{ slot.door or '—' }}
+  {% if rep.start <= now < rep.end %} · <span class="pill ok">در حال برگزاری</span>{% elif now < rep.start %} · <span class="pill mut">شروع نشده</span>{% endif %}</p>
+<div class="box scroll">
+<table>
+<thead><tr><th>نام</th><th>وضعیت</th><th>ورود</th><th>خروج</th><th>مدت حضور در کلاس</th><th>تعداد کارت‌زدن</th></tr></thead>
+<tbody>
+{% for r in rep.rows %}
+<tr>
+  <td><a href="{{ url_for('card_edit', card_id=r.card.id) }}">{{ r.card.name }}</a></td>
+  <td>{% if not r.scans %}<span class="pill bad">غایب</span>{% elif r.open and now < rep.end %}<span class="pill ok">داخل کلاس</span>{% elif r.open %}<span class="pill warn" title="خروج ثبت نشده؛ تا پایان کلاس حساب شد">خروج ثبت نشد</span>{% else %}<span class="pill mut">حاضر</span>{% endif %}</td>
+  <td>{{ r.first_in|jtime if r.first_in else '—' }}</td>
+  <td>{{ r.last_out|jtime if r.last_out else '—' }}</td>
+  <td>{{ r.secs|dur if r.scans else '—' }}</td>
+  <td>{{ r.scans|fa }}</td>
+</tr>
+{% else %}
+<tr><td colspan="6" class="mut">این کلاس عضوی ندارد.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% if rep.refused %}
+<div class="box">
+  <h2>کارت‌های ردشده در این جلسه</h2>
+  {{ events_table(rep.refused) }}
+</div>
+{% endif %}
+{% endblock %}

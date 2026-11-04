@@ -8,15 +8,18 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-{% if session.user %}
+{% if g.user %}
 <header><div class="in">
-  <span class="brand">🔑 کنترل تردد</span>
+  <span class="brand">🔑 {{ g.org.name if g.org else 'کنترل تردد' }}</span>
   <nav>
-    {% for ep, label in [('live','نمایشگر'),('dashboard','داشبورد'),('cards','کارت‌ها'),('doors','درها'),('events','گزارش تردد'),('attendance','حضور و غیاب'),('settings','تنظیمات')] %}
-    <a href="{{ url_for(ep) }}" class="{{ 'on' if request.endpoint == ep or (ep == 'cards' and request.endpoint in ('card_new','card_edit')) }}">{{ label }}</a>
+    {% if g.org %}
+    {% for ep, label in [('live','نمایشگر'),('dashboard','داشبورد'),('cards','کارت‌ها'),('doors','دستگاه‌ها'),('classes','کلاس‌ها'),('events','گزارش تردد'),('attendance','حضور روزانه'),('settings','تنظیمات')] %}
+    <a href="{{ url_for(ep) }}" class="{{ 'on' if request.endpoint == ep or (ep == 'cards' and request.endpoint in ('card_new','card_edit')) or (ep == 'classes' and request.endpoint in ('class_view','class_session')) }}">{{ label }}</a>
     {% endfor %}
+    {% endif %}
+    {% if g.owner %}<a href="{{ url_for('admin') }}" class="{{ 'on' if request.endpoint == 'admin' }}">مدیریت سرور</a>{% endif %}
   </nav>
-  <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn sec sm">خروج ({{ session.user }})</button></form>
+  <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn sec sm">خروج ({{ g.user.username }})</button></form>
 </div></header>
 {% endif %}
 <main>

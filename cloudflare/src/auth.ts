@@ -72,6 +72,8 @@ export async function checkPassword(stored: string, password: string): Promise<b
 
 export type SessionData = {
   user?: string;
+  uid?: number;
+  view_org?: number;
   csrf?: string;
   exp?: number;
   flashes?: [string, string][];

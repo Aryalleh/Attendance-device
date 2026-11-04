@@ -1,5 +1,5 @@
 {% macro result_pill(r) -%}
-<span class="pill {{ {'granted':'ok','manual':'mut','expired':'warn','disabled':'warn'}.get(r, 'bad') }}">{{ RESULT_FA.get(r, r) }}</span>
+<span class="pill {{ {'granted':'ok','manual':'mut','expired':'warn','disabled':'warn','not_member':'warn'}.get(r, 'bad') }}">{{ RESULT_FA.get(r, r) }}</span>
 {%- endmacro %}
 
 {% macro dir_label(d) -%}
@@ -10,7 +10,7 @@
 
 {% macro events_table(rows, show_door=true) -%}
 <div class="scroll"><table>
-<thead><tr><th>زمان</th><th>نام</th><th>شناسه کارت</th>{% if show_door %}<th>در</th>{% endif %}<th>نتیجه</th><th>جهت</th></tr></thead>
+<thead><tr><th>زمان</th><th>نام</th><th>شناسه کارت</th>{% if show_door %}<th>دستگاه</th>{% endif %}<th>کلاس</th><th>نتیجه</th><th>جهت</th></tr></thead>
 <tbody>
 {% for e in rows %}
 <tr>
@@ -18,11 +18,12 @@
   <td>{% if e.card_id %}<a href="{{ url_for('card_edit', card_id=e.card_id) }}">{{ e.name }}</a>{% else %}{{ e.name or '' }}{% endif %}</td>
   <td class="mono">{% if e.result == 'unknown' %}<a href="{{ url_for('card_new', uid=e.uid) }}" title="ثبت این کارت">{{ e.uid }}</a>{% else %}{{ e.uid }}{% endif %}</td>
   {% if show_door %}<td>{{ e.door or '—' }}</td>{% endif %}
+  <td>{% if e.class_id %}<a href="{{ url_for('class_view', class_id=e.class_id) }}">{{ e.class_name }}</a>{% else %}<span class="mut">—</span>{% endif %}</td>
   <td>{{ result_pill(e.result) }}</td>
   <td class="nowrap">{{ dir_label(e.direction) }}</td>
 </tr>
 {% else %}
-<tr><td colspan="6" class="mut">رویدادی ثبت نشده است.</td></tr>
+<tr><td colspan="7" class="mut">رویدادی ثبت نشده است.</td></tr>
 {% endfor %}
 </tbody></table></div>
 {%- endmacro %}

@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% from "_macros.html" import csrf %}
-{% block title %}درها · کنترل تردد{% endblock %}
+{% block title %}دستگاه‌ها · کنترل تردد{% endblock %}
 {% block body %}
-<h1>درها</h1>
+<h1>دستگاه‌ها</h1>
+<p class="mut">هر دستگاه (کارت‌خوان Wemos یا گوشی اندروید) یک کلید دارد. کلید را در تنظیمات دستگاه یا برنامهٔ اندروید وارد کنید. برای حضور و غیاب کلاس‌ها، دستگاه را در صفحهٔ هر کلاس به زمان‌های آن کلاس وصل کنید.</p>
 
 {% if new_key %}
 <div class="key">
@@ -14,7 +15,7 @@
 
 <div class="box scroll">
 <table>
-<thead><tr><th>در</th><th>وضعیت</th><th>جهت</th><th>زمان باز ماندن</th><th>نسخه / IP</th><th></th></tr></thead>
+<thead><tr><th>دستگاه</th><th>وضعیت</th><th>جهت</th><th>زمان باز ماندن</th><th>نسخه / IP</th><th></th></tr></thead>
 <tbody>
 {% for d in doors %}
 <tr>
@@ -43,14 +44,14 @@
   </td>
 </tr>
 {% else %}
-<tr><td colspan="6" class="mut">هنوز دری تعریف نشده است.</td></tr>
+<tr><td colspan="6" class="mut">هنوز دستگاهی تعریف نشده است.</td></tr>
 {% endfor %}
 </tbody>
 </table>
 </div>
 
 <div class="box">
-  <h2>افزودن در</h2>
+  <h2>افزودن دستگاه</h2>
   <form method="post" action="{{ url_for('door_new') }}" class="row">
     {{ csrf() }}
     <div><label>نام</label><input name="name" placeholder="ورودی اصلی" required></div>

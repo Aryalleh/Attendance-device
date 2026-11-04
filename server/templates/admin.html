@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}مدیریت سرور · کنترل تردد{% endblock %}
+{% block body %}
+<h1>مدیریت سرور</h1>
+<p class="mut">هر سازمان (شرکت یا تیم) کاربران، کارت‌ها، دستگاه‌ها، کلاس‌ها و گزارش‌های جداگانه دارد و داده‌های سازمان‌های دیگر را نمی‌بیند. کاربران هر سازمان دستگاه‌های خودشان را تعریف می‌کنند.</p>
+
+<div class="box scroll">
+<table>
+<thead><tr><th>سازمان</th><th>وضعیت</th><th>کاربران</th><th>دستگاه</th><th>کارت</th><th>کلاس</th><th>آخرین تردد</th><th></th></tr></thead>
+<tbody>
+{% for o in orgs %}
+<tr>
+  <td><b>{{ o.name }}</b></td>
+  <td>{% if o.enabled %}<span class="pill ok">فعال</span>{% else %}<span class="pill bad">غیرفعال</span>{% endif %}</td>
+  <td class="ltr">{% for u in users.get(o.id, []) %}{{ u.username }}{% if not loop.last %}، {% endif %}{% else %}<span class="mut">—</span>{% endfor %}</td>
+  <td>{{ o.n_devices|fa }}</td><td>{{ o.n_cards|fa }}</td><td>{{ o.n_classes|fa }}</td>
+  <td class="nowrap mut">{{ o.last_event|ago }}</td>
+  <td class="nowrap end">
+    <form class="inline" method="post" action="{{ url_for('admin_view') }}">{{ csrf() }}<input type="hidden" name="org" value="{{ o.id }}"><button class="btn sm">ورود به پنل</button></form>
+    <details style="display:inline-block;vertical-align:top"><summary class="btn sec sm">مدیریت</summary>
+      <div class="box popup" style="min-width:300px">
+        <form method="post">{{ csrf() }}<input type="hidden" name="action" value="rename"><input type="hidden" name="org" value="{{ o.id }}">
+          <label>نام سازمان</label><input name="name" value="{{ o.name }}" required>
+          <p><button class="btn sm">ذخیره نام</button></p></form>
+        <form method="post">{{ csrf() }}<input type="hidden" name="action" value="toggle"><input type="hidden" name="org" value="{{ o.id }}">
+          <p><button class="btn sec sm">{{ 'غیرفعال کن (ورود کاربران و همه دستگاه‌ها متوقف می‌شود)' if o.enabled else 'فعال کن' }}</button></p></form>
+        <h3>کاربران</h3>
+        {% for u in users.get(o.id, []) %}
+        <div class="row" style="padding:2px 0"><span class="ltr">{{ u.username }}</span>
+          <form class="inline auto" method="post">{{ csrf() }}<input type="hidden" name="action" value="reset_pw"><input type="hidden" name="id" value="{{ u.id }}">
+            <input type="password" name="password" dir="ltr" minlength="8" placeholder="رمز جدید" style="width:9em" required><button class="btn sec sm">تغییر رمز</button></form>
+          <form class="inline" method="post" onsubmit="return confirm('کاربر {{ u.username }} حذف شود؟')">{{ csrf() }}<input type="hidden" name="action" value="del_user"><input type="hidden" name="id" value="{{ u.id }}"><button class="btn red sm">حذف</button></form>
+        </div>
+        {% endfor %}
+        <form method="post" class="row">{{ csrf() }}<input type="hidden" name="action" value="add_user"><input type="hidden" name="org" value="{{ o.id }}">
+          <div><label>کاربر جدید</label><input name="username" dir="ltr" required></div>
+          <div><label>رمز</label><input type="password" name="password" dir="ltr" minlength="8" required></div>
+          <div class="auto"><button class="btn sm">افزودن</button></div></form>
+        <form method="post" onsubmit="return confirm('همه کارت‌ها، دستگاه‌ها، کلاس‌ها و گزارش‌های این سازمان برای همیشه حذف شوند؟')">{{ csrf() }}
+          <input type="hidden" name="action" value="delete"><input type="hidden" name="org" value="{{ o.id }}">
+          <label>برای حذف کامل، نام سازمان را بنویسید</label><input name="confirm" placeholder="{{ o.name }}">
+          <p><button class="btn red sm">حذف سازمان</button></p></form>
+      </div>
+    </details>
+  </td>
+</tr>
+{% else %}
+<tr><td colspan="8" class="mut">هنوز سازمانی ساخته نشده است.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+
+<div class="grid">
+  <div class="box">
+    <h2>سازمان جدید</h2>
+    <form method="post">{{ csrf() }}<input type="hidden" name="action" value="new_org">
+      <label>نام سازمان / شرکت / تیم</label><input name="name" required>
+      <div class="row">
+        <div><label>نام کاربری مدیر سازمان</label><input name="username" dir="ltr" required></div>
+        <div><label>رمز (حداقل ۸ کاراکتر)</label><input type="password" name="password" dir="ltr" minlength="8" required></div>
+      </div>
+      <p><button class="btn">ساخت سازمان</button></p>
+    </form>
+    <p class="mut">این نام کاربری و رمز را به سازمان بدهید. آن‌ها با آن وارد پنل خودشان می‌شوند، دستگاه تعریف می‌کنند و می‌توانند کاربران دیگری برای سازمان خود بسازند.</p>
+  </div>
+
+  <div class="box">
+    <h2>مدیران سرور</h2>
+    {% for u in users.get(None, []) %}
+    <div class="row" style="padding:2px 0"><span class="ltr">{{ u.username }}</span>{% if u.id == g.user.id %} <span class="mut">(شما)</span>{% else %}
+      <form class="inline auto" method="post" onsubmit="return confirm('مدیر {{ u.username }} حذف شود؟')">{{ csrf() }}<input type="hidden" name="action" value="del_user"><input type="hidden" name="id" value="{{ u.id }}"><button class="btn red sm">حذف</button></form>{% endif %}</div>
+    {% endfor %}
+    <form method="post" class="row">{{ csrf() }}<input type="hidden" name="action" value="add_owner">
+      <div><label>نام کاربری</label><input name="username" dir="ltr" required></div>
+      <div><label>رمز</label><input type="password" name="password" dir="ltr" minlength="8" required></div>
+      <div class="auto"><button class="btn sm">افزودن مدیر</button></div></form>
+    <h3>تغییر رمز من</h3>
+    <form method="post">{{ csrf() }}<input type="hidden" name="action" value="password">
+      <div class="row">
+        <div><label>رمز فعلی</label><input type="password" dir="ltr" name="current" autocomplete="current-password" required></div>
+        <div><label>رمز جدید</label><input type="password" dir="ltr" name="new" autocomplete="new-password" minlength="8" required></div>
+        <div class="auto"><button class="btn sm">تغییر رمز</button></div>
+      </div>
+    </form>
+  </div>
+
+  <div class="box">
+    <h2>اتصال به سرویس‌های دیگر</h2>
+    <p>API فقط‌خواندنی (همه سازمان‌ها): {% if api_enabled %}<span class="pill ok">فعال</span>{% else %}<span class="pill mut">غیرفعال</span> — متغیر <span class="mono">ACCESSCTL_API_TOKEN</span> را تنظیم کنید{% endif %}</p>
+    <p class="mono mut" style="font-size:12px;text-align:left">GET /api/v1/presence?org=&lt;id&gt;<br>GET /api/v1/events?since=&lt;last id&gt;&amp;org=&lt;id&gt;<br>Header: Authorization: Bearer &lt;token&gt;</p>
+    <p>Webhook: {% if webhook %}<span class="mono">{{ webhook }}</span>{% else %}<span class="pill mut">غیرفعال</span> — متغیر <span class="mono">ACCESSCTL_WEBHOOK_URL</span> را تنظیم کنید{% endif %}</p>
+  </div>
+</div>
+{% endblock %}

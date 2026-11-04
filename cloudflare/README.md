@@ -31,8 +31,11 @@ npx wrangler secret put ADMIN_PASSWORD  # password for user "admin"
 npm run deploy                          # prints https://accessctl.<your-subdomain>.workers.dev
 ```
 
-Open that URL and log in as `admin`. Add your doors and cards on the **Doors** and
-**Cards** pages, then enter the server address and the door key in each device.
+Open that URL and log in as `admin` (the server owner). On **مدیریت سرور** create a company with its
+login; that company then adds its own devices, cards and classes in its panel. Enter the server address and the
+device key in each device. Companies, classes and the upgrade of an existing database work exactly as on the Flask
+server (see the main README): `npm run db:migrate` applies `migrations/0002_multitenant.sql`, which moves existing
+data into «سازمان پیش‌فرض».
 
 Optional:
 
@@ -49,9 +52,10 @@ python3 scripts/export-sqlite.py ../server/data/access.db > export.sql
 npx wrangler d1 execute accessctl --remote --file export.sql
 ```
 
-This copies cards, doors (with their keys, so devices keep working), events and the
-card revision. Panel users are not copied, because passwords are stored differently.
-Use `ADMIN_PASSWORD` or `set-password.mjs` instead.
+This copies companies, cards, devices (with their keys, so devices keep working), classes with their
+members and schedules, events and the card revision. Start the current Flask server once first (it upgrades its
+database), and run `npm run db:migrate` on D1. Panel users are not copied, because passwords are stored differently:
+use `ADMIN_PASSWORD` or `set-password.mjs` for the server owner, then recreate company logins on the admin page.
 
 ## Point a device at the Worker
 
