@@ -9,7 +9,6 @@
     <string name="door_key_hint">از پنل سرور: درها ← در جدید / کلید جدید</string>
     <string name="admin_pin">رمز مدیر (برای خروج از نمایشگر)</string>
     <string name="admin_pin_hint">فقط عدد؛ خالی = بدون رمز</string>
-    <string name="offline_fallback">حالت آفلاین: اگر سرور در دسترس نبود، کارت‌های ذخیره‌شده پذیرفته شوند</string>
     <string name="lock_task">قفل گوشی روی صفحهٔ نمایشگر</string>
     <string name="auto_start">باز شدن خودکار نمایشگر پس از روشن شدن گوشی</string>
     <string name="save">ذخیره و شروع</string>
@@ -30,8 +29,7 @@
     <string name="cancel">انصراف</string>
 
     <string name="ready">کارت خود را نزدیک گوشی کنید</string>
-    <string name="offline">سرور در دسترس نیست — کارت‌ها روی خود دستگاه بررسی می‌شوند</string>
-    <string name="offline_queue">سرور در دسترس نیست — %1$d تردد در انتظار ارسال</string>
+    <string name="offline">سرور در دسترس نیست — کارت‌ها بررسی نمی‌شوند</string>
     <string name="no_nfc">این گوشی NFC ندارد</string>
     <string name="nfc_off">NFC خاموش است — آن را در تنظیمات اندروید روشن کنید</string>
     <string name="connecting">در حال اتصال به سرور…</string>
@@ -48,5 +46,5 @@
     <string name="entry_logged">ورود ثبت شد</string>
     <string name="exit_logged">خروج ثبت شد</string>
     <string name="remote_open">در از راه دور باز شد</string>
-    <string name="saved_offline">به‌صورت آفلاین ذخیره شد و بعداً ارسال می‌شود</string>
+    <string name="try_again">اتصال شبکه را بررسی کنید و دوباره امتحان کنید</string>
 </resources>

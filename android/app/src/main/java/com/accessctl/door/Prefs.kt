@@ -15,9 +15,6 @@ class Prefs(context: Context) {
     var pin: String
         get() = sp.getString("pin", "") ?: ""
         set(v) = sp.edit().putString("pin", v.trim()).apply()
-    var offlineFallback: Boolean
-        get() = sp.getBoolean("offline_fallback", true)
-        set(v) = sp.edit().putBoolean("offline_fallback", v).apply()
     var lockTask: Boolean
         get() = sp.getBoolean("lock_task", true)
         set(v) = sp.edit().putBoolean("lock_task", v).apply()
@@ -28,9 +25,6 @@ class Prefs(context: Context) {
     var kioskEnabled: Boolean
         get() = sp.getBoolean("kiosk_enabled", true)
         set(v) = sp.edit().putBoolean("kiosk_enabled", v).apply()
-    var cardsVersion: String
-        get() = sp.getString("cards_version", "") ?: ""
-        set(v) = sp.edit().putString("cards_version", v).apply()
     var doorName: String
         get() = sp.getString("door_name", "") ?: ""
         set(v) = sp.edit().putString("door_name", v).apply()

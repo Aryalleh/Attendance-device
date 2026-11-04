@@ -5,11 +5,11 @@
 This app turns an Android phone with NFC into a door device. It replaces the Wemos + RC522:
 
 - the phone's **NFC antenna reads the cards** (13.56 MHz: MIFARE, NTAG, etc.; the card UID is used, as on the RC522),
-- it talks to the server through the **same device API** as the firmware (`/api/v1/scan`, `/sync`, `/cards`, with `X-Device-Key`),
+- it talks to the server through the **same device API** as the firmware (`/api/v1/scan`, `/sync`, with `X-Device-Key`),
 - its screen **opens the door's live screen (kiosk) automatically** and stays on it: full screen, screen always on,
   started at boot, registered as a Home app, and locked to the app (Android lock-task),
-- it keeps working **when the server is down**: it checks cards against a cached list, shows the result on its own
-  screen and uploads the queued scans when the server is back. This matches the firmware's server mode.
+- it is **online only**: every card is decided by the server. The phone stores no card list and no offline log.
+  If the server can't be reached, the scan is refused and the screen says "server unreachable".
 
 ```
  card ─► phone NFC ─► Door Kiosk app ──Wi-Fi──► server (Flask or Cloudflare)
@@ -62,8 +62,8 @@ From there, **Exit kiosk mode** returns the phone to its normal launcher until y
 - The same card is ignored for 2 s after a scan, as on the Wemos.
 - `http://` servers on the LAN are allowed (cleartext traffic is enabled for this).
 - Sounds: the live page plays its own chime. The phone also beeps when it reads a card and vibrates on a refusal.
-- While the server is down, the offline fallback toggles in/out for each cached card. Turn it off in the settings if a
-  missing server should refuse every card.
+- There is no standalone or offline mode on the phone: keep it on reliable Wi-Fi. A refused scan while the server is
+  down is not logged.
 
 ---
 
@@ -74,10 +74,11 @@ From there, **Exit kiosk mode** returns the phone to its normal launcher until y
 این برنامه یک گوشی اندرویدی دارای NFC را به **دستگاه در** تبدیل می‌کند، به جای Wemos و RC522:
 
 - **آنتن NFC گوشی کارت را می‌خواند** (۱۳٫۵۶ مگاهرتز؛ شناسهٔ کارت مثل RC522 استفاده می‌شود)،
-- با **همان API دستگاه** با سرور صحبت می‌کند (`/api/v1/scan`، `/sync`، `/cards` با هدر `X-Device-Key`)،
+- با **همان API دستگاه** با سرور صحبت می‌کند (`/api/v1/scan` و `/sync` با هدر `X-Device-Key`)،
 - صفحهٔ گوشی **به‌طور خودکار نمایشگر زندهٔ همین در (کیوسک)** را باز می‌کند و روی آن می‌ماند: تمام‌صفحه، صفحه همیشه روشن،
   اجرا پس از روشن شدن گوشی، ثبت به‌عنوان برنامهٔ Home و قفل روی برنامه،
-- اگر **سرور قطع باشد** با لیست ذخیره‌شدهٔ کارت‌ها کار می‌کند، نتیجه را روی صفحهٔ خودش نشان می‌دهد و تردد‌ها را بعداً ارسال می‌کند.
+- **فقط آنلاین** کار می‌کند: همهٔ کارت‌ها را سرور بررسی می‌کند و گوشی هیچ لیست کارت یا گزارش آفلاینی نگه نمی‌دارد.
+  اگر سرور در دسترس نباشد، کارت رد می‌شود و روی صفحه «سرور در دسترس نیست» نمایش داده می‌شود.
 
 ### نصب
 

@@ -52,7 +52,6 @@ class KioskActivity : Activity(), NfcAdapter.ReaderCallback, Door.Listener {
     private var pageLoaded = false
     private var pageLoading = false
     private var serverOnline = false
-    private var queued = 0
     private var lastUid = ""
     private var lastScanMs = 0L
     private var cornerTaps = 0
@@ -83,7 +82,7 @@ class KioskActivity : Activity(), NfcAdapter.ReaderCallback, Door.Listener {
         nativeStatus = findViewById(R.id.nativeStatus)
         findViewById<TextView>(R.id.doorName).text = prefs.doorName
 
-        door = Door(this, this)
+        door = Door(prefs, this)
         nfc = NfcAdapter.getDefaultAdapter(this)
         tones = try { ToneGenerator(AudioManager.STREAM_MUSIC, 90) } catch (_: Exception) { null }
 
@@ -285,9 +284,8 @@ class KioskActivity : Activity(), NfcAdapter.ReaderCallback, Door.Listener {
         showResult(r)
     }
 
-    override fun onServerState(online: Boolean, queued: Int) {
+    override fun onServerState(online: Boolean) {
         serverOnline = online
-        this.queued = queued
         updateBanner()
         if (online && !pageLoaded && !pageLoading) loadKiosk()
     }
@@ -318,6 +316,7 @@ class KioskActivity : Activity(), NfcAdapter.ReaderCallback, Door.Listener {
             ok && r.direction == "out" -> R.string.goodbye
             ok && r.direction == "in" -> R.string.welcome
             ok -> R.string.granted
+            !r.online -> R.string.server_unreachable
             else -> R.string.denied
         })
         findViewById<TextView>(R.id.ovName).text = when {
@@ -332,10 +331,9 @@ class KioskActivity : Activity(), NfcAdapter.ReaderCallback, Door.Listener {
             r.result == "disabled" -> getString(R.string.card_disabled)
             r.result == "expired" -> getString(R.string.card_expired)
             r.online -> getString(R.string.door_disabled)
-            else -> getString(R.string.server_unreachable)
+            else -> getString(R.string.try_again)
         }
-        findViewById<TextView>(R.id.ovSub).text =
-            if (!r.online && !info) listOf(sub, getString(R.string.saved_offline)).filter { it.isNotEmpty() }.joinToString("\n") else sub
+        findViewById<TextView>(R.id.ovSub).text = sub
         overlay.visibility = View.VISIBLE
         main.removeCallbacks(hideOverlay)
         main.postDelayed(hideOverlay, RESULT_HOLD_MS)
@@ -353,7 +351,6 @@ class KioskActivity : Activity(), NfcAdapter.ReaderCallback, Door.Listener {
         when {
             a == null -> showBanner(getString(R.string.no_nfc))
             !a.isEnabled -> showBanner(getString(R.string.nfc_off))
-            !serverOnline && queued > 0 -> showBanner(getString(R.string.offline_queue, queued))
             !serverOnline && pageLoaded -> showBanner(getString(R.string.offline))
             else -> banner.visibility = View.GONE
         }

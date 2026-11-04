@@ -9,7 +9,6 @@
     <string name="door_key_hint">From the server panel: Doors → new door / new key</string>
     <string name="admin_pin">Admin PIN (to leave the kiosk screen)</string>
     <string name="admin_pin_hint">Digits only; empty = no PIN</string>
-    <string name="offline_fallback">Offline fallback: admit cached cards when the server is unreachable</string>
     <string name="lock_task">Lock the phone to the kiosk screen</string>
     <string name="auto_start">Open the kiosk screen automatically after boot</string>
     <string name="save">Save and start</string>
@@ -30,8 +29,7 @@
     <string name="cancel">Cancel</string>
 
     <string name="ready">Hold your card near the phone</string>
-    <string name="offline">Server offline — cards are checked locally</string>
-    <string name="offline_queue">Server offline — %1$d scans waiting to upload</string>
+    <string name="offline">Server offline — cards cannot be checked</string>
     <string name="no_nfc">This phone has no NFC reader</string>
     <string name="nfc_off">NFC is turned off — enable it in Android settings</string>
     <string name="connecting">Connecting to the server…</string>
@@ -48,5 +46,5 @@
     <string name="entry_logged">Entry recorded</string>
     <string name="exit_logged">Exit recorded</string>
     <string name="remote_open">Door opened remotely</string>
-    <string name="saved_offline">Saved offline — will upload later</string>
+    <string name="try_again">Check the network and try again</string>
 </resources>

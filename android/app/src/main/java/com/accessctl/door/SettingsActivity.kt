@@ -22,7 +22,6 @@ class SettingsActivity : Activity() {
     private lateinit var server: EditText
     private lateinit var key: EditText
     private lateinit var pin: EditText
-    private lateinit var offline: CheckBox
     private lateinit var lock: CheckBox
     private lateinit var boot: CheckBox
     private lateinit var status: TextView
@@ -68,7 +67,6 @@ class SettingsActivity : Activity() {
         label(R.string.admin_pin)
         pin = field(R.string.admin_pin_hint, prefs.pin, InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD)
         col.addView(View(this), LinearLayout.LayoutParams(1, dp(8)))
-        offline = check(R.string.offline_fallback, prefs.offlineFallback)
         lock = check(R.string.lock_task, prefs.lockTask)
         boot = check(R.string.auto_start, prefs.autoStart)
 
@@ -131,16 +129,13 @@ class SettingsActivity : Activity() {
                 if (isFinishing) return@runOnUiThread
                 when {
                     r.ok -> {
-                        val changed = url != prefs.server || k != prefs.key
                         prefs.server = url
                         prefs.key = k
                         prefs.pin = pin.text.toString()
-                        prefs.offlineFallback = offline.isChecked
                         prefs.lockTask = lock.isChecked
                         prefs.autoStart = boot.isChecked
                         prefs.kioskEnabled = true
                         prefs.doorName = r.json().optString("name", "")
-                        if (changed) prefs.cardsVersion = ""     // fetch this server's card list
                         showStatus(getString(R.string.connected, prefs.doorName), true)
                         // back to the kiosk screen; it reloads the live page if the server or key changed
                         startActivity(Intent(this, KioskActivity::class.java)

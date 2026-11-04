@@ -38,7 +38,7 @@ You switch modes in the device's own panel (Settings → Mode). No display is ne
 | `hardware/` | Carrier PCB (KiCad 10): schematic, 2-layer layout, gerbers, renders |
 | `docs/` | Assembly guide (EN/FA) and project proposal |
 | `cloudflare/` | Optional: the same server on Cloudflare Workers ([its README](cloudflare/README.md)) |
-| `android/` | Optional: Android app that turns an NFC phone into a door device with a kiosk screen ([its README](android/README.md)) |
+| `android/` | Optional: Android app that turns an NFC phone into an online-only door device with a kiosk screen ([its README](android/README.md)) |
 
 ---
 
