@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Door Kiosk</string>
+    <string name="settings_title">Door setup</string>
+
+    <string name="server_url">Server address</string>
+    <string name="server_url_hint">http://192.168.1.10:8080 or https://….workers.dev</string>
+    <string name="door_key">Door key</string>
+    <string name="door_key_hint">From the server panel: Doors → new door / new key</string>
+    <string name="admin_pin">Admin PIN (to leave the kiosk screen)</string>
+    <string name="admin_pin_hint">Digits only; empty = no PIN</string>
+    <string name="offline_fallback">Offline fallback: admit cached cards when the server is unreachable</string>
+    <string name="lock_task">Lock the phone to the kiosk screen</string>
+    <string name="auto_start">Open the kiosk screen automatically after boot</string>
+    <string name="save">Save and start</string>
+    <string name="exit_kiosk">Exit kiosk mode</string>
+    <string name="remove_owner">Remove device owner (needed before uninstalling)</string>
+    <string name="testing">Connecting to the server…</string>
+    <string name="connected">Connected — door: %1$s</string>
+    <string name="conn_failed">Could not connect: %1$s</string>
+    <string name="bad_key">The server rejected this door key.</string>
+    <string name="fill_in">Enter the server address and the door key.</string>
+    <string name="owner_on">Device owner: yes — full lock-down is active.</string>
+    <string name="owner_off">Device owner: no — Android will ask once to pin the screen. See README for full lock-down.</string>
+    <string name="owner_removed">Device owner removed. You can uninstall the app now.</string>
+
+    <string name="pin_title">Admin PIN</string>
+    <string name="pin_wrong">Wrong PIN</string>
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+
+    <string name="ready">Hold your card near the phone</string>
+    <string name="offline">Server offline — cards are checked locally</string>
+    <string name="offline_queue">Server offline — %1$d scans waiting to upload</string>
+    <string name="no_nfc">This phone has no NFC reader</string>
+    <string name="nfc_off">NFC is turned off — enable it in Android settings</string>
+    <string name="connecting">Connecting to the server…</string>
+
+    <string name="welcome">Welcome</string>
+    <string name="goodbye">Goodbye</string>
+    <string name="granted">Access granted</string>
+    <string name="denied">Access denied</string>
+    <string name="unknown_card">Unknown card</string>
+    <string name="card_disabled">This card is disabled</string>
+    <string name="card_expired">This card has expired</string>
+    <string name="door_disabled">This door is disabled</string>
+    <string name="server_unreachable">Server unreachable</string>
+    <string name="entry_logged">Entry recorded</string>
+    <string name="exit_logged">Exit recorded</string>
+    <string name="remote_open">Door opened remotely</string>
+    <string name="saved_offline">Saved offline — will upload later</string>
+</resources>

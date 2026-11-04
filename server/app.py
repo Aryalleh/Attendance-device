@@ -360,6 +360,13 @@ def register_routes(app):
                 lines.append(f"{c['uid']}\t1\t{1 if c['last_dir'] == 'in' else 0}\t{c['name']}")
         return Response("\n".join(lines) + "\n", mimetype="text/tab-separated-values")
 
+    @app.get("/api/v1/kiosk")
+    @device_required
+    def api_kiosk():
+        """Live-screen link for this door; the Android app shows it full screen."""
+        dev = g.device
+        return jsonify(name=dev["name"], url=url_for("kiosk", token=kiosk_token(dev)))
+
     # ---- integration API (read-only, Bearer token) ----
 
     @app.get("/api/v1/presence")

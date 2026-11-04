@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">نمایشگر در</string>
+    <string name="settings_title">تنظیم دستگاه</string>
+
+    <string name="server_url">آدرس سرور</string>
+    <string name="server_url_hint">http://192.168.1.10:8080 یا https://….workers.dev</string>
+    <string name="door_key">کلید در</string>
+    <string name="door_key_hint">از پنل سرور: درها ← در جدید / کلید جدید</string>
+    <string name="admin_pin">رمز مدیر (برای خروج از نمایشگر)</string>
+    <string name="admin_pin_hint">فقط عدد؛ خالی = بدون رمز</string>
+    <string name="offline_fallback">حالت آفلاین: اگر سرور در دسترس نبود، کارت‌های ذخیره‌شده پذیرفته شوند</string>
+    <string name="lock_task">قفل گوشی روی صفحهٔ نمایشگر</string>
+    <string name="auto_start">باز شدن خودکار نمایشگر پس از روشن شدن گوشی</string>
+    <string name="save">ذخیره و شروع</string>
+    <string name="exit_kiosk">خروج از حالت نمایشگر</string>
+    <string name="remove_owner">حذف «مالک دستگاه» (پیش از حذف برنامه لازم است)</string>
+    <string name="testing">در حال اتصال به سرور…</string>
+    <string name="connected">متصل شد — در: %1$s</string>
+    <string name="conn_failed">اتصال برقرار نشد: %1$s</string>
+    <string name="bad_key">سرور این کلید در را نپذیرفت.</string>
+    <string name="fill_in">آدرس سرور و کلید در را وارد کنید.</string>
+    <string name="owner_on">مالک دستگاه: بله — قفل کامل فعال است.</string>
+    <string name="owner_off">مالک دستگاه: خیر — اندروید یک بار برای سنجاق کردن صفحه سؤال می‌کند. برای قفل کامل راهنما را ببینید.</string>
+    <string name="owner_removed">مالک دستگاه حذف شد. اکنون می‌توانید برنامه را حذف کنید.</string>
+
+    <string name="pin_title">رمز مدیر</string>
+    <string name="pin_wrong">رمز اشتباه است</string>
+    <string name="ok">تأیید</string>
+    <string name="cancel">انصراف</string>
+
+    <string name="ready">کارت خود را نزدیک گوشی کنید</string>
+    <string name="offline">سرور در دسترس نیست — کارت‌ها روی خود دستگاه بررسی می‌شوند</string>
+    <string name="offline_queue">سرور در دسترس نیست — %1$d تردد در انتظار ارسال</string>
+    <string name="no_nfc">این گوشی NFC ندارد</string>
+    <string name="nfc_off">NFC خاموش است — آن را در تنظیمات اندروید روشن کنید</string>
+    <string name="connecting">در حال اتصال به سرور…</string>
+
+    <string name="welcome">خوش آمدید</string>
+    <string name="goodbye">خدانگهدار</string>
+    <string name="granted">دسترسی مجاز</string>
+    <string name="denied">دسترسی رد شد</string>
+    <string name="unknown_card">کارت ناشناس</string>
+    <string name="card_disabled">این کارت مسدود است</string>
+    <string name="card_expired">اعتبار این کارت به پایان رسیده است</string>
+    <string name="door_disabled">این در غیرفعال است</string>
+    <string name="server_unreachable">سرور در دسترس نیست</string>
+    <string name="entry_logged">ورود ثبت شد</string>
+    <string name="exit_logged">خروج ثبت شد</string>
+    <string name="remote_open">در از راه دور باز شد</string>
+    <string name="saved_offline">به‌صورت آفلاین ذخیره شد و بعداً ارسال می‌شود</string>
+</resources>

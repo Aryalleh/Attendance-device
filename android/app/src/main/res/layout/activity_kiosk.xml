@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0E1116"
+    android:keepScreenOn="true">
+
+    <!-- The server's live screen for this door (/kiosk/<token>) -->
+    <WebView
+        android:id="@+id/web"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#0E1116"
+        android:visibility="invisible" />
+
+    <!-- Built-in screen, used while the server page can't be loaded -->
+    <LinearLayout
+        android:id="@+id/nativeScreen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:id="@+id/doorName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#8B93A3"
+            android:textSize="20sp" />
+
+        <TextClock
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:format12Hour="HH:mm:ss"
+            android:format24Hour="HH:mm:ss"
+            android:textColor="#EEF1F6"
+            android:textSize="56sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="40dp"
+            android:text="@string/ready"
+            android:textAlignment="center"
+            android:textColor="#EEF1F6"
+            android:textSize="26sp" />
+
+        <TextView
+            android:id="@+id/nativeStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/connecting"
+            android:textAlignment="center"
+            android:textColor="#8B93A3"
+            android:textSize="16sp" />
+    </LinearLayout>
+
+    <!-- Result of a scan decided on the phone (server unreachable) -->
+    <LinearLayout
+        android:id="@+id/overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#0E1116"
+        android:clickable="true"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="24dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/ovIcon"
+            android:layout_width="160dp"
+            android:layout_height="160dp"
+            android:gravity="center"
+            android:textSize="96sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/ovTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:textAlignment="center"
+            android:textSize="30sp" />
+
+        <TextView
+            android:id="@+id/ovName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textAlignment="center"
+            android:textColor="#EEF1F6"
+            android:textSize="54sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/ovSub"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textAlignment="center"
+            android:textColor="#8B93A3"
+            android:textSize="20sp" />
+    </LinearLayout>
+
+    <!-- Problems (NFC off, server offline) -->
+    <TextView
+        android:id="@+id/banner"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="100dp"
+        android:background="#2E1012"
+        android:padding="12dp"
+        android:textColor="#EEF1F6"
+        android:textSize="15sp"
+        android:visibility="gone" />
+
+    <!-- Hidden admin corner: tap 5 times quickly to open the settings (PIN protected) -->
+    <View
+        android:id="@+id/adminCorner"
+        android:layout_width="80dp"
+        android:layout_height="80dp"
+        android:layout_gravity="top|right" />
+</FrameLayout>

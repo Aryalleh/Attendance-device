@@ -261,6 +261,12 @@ async function apiCards(c: Ctx) {
   return new Response(lines.join("\n") + "\n", { headers: { "Content-Type": "text/tab-separated-values" } });
 }
 
+// Live-screen link for this door; the Android app shows it full screen.
+async function apiKiosk(c: Ctx) {
+  const dev = await deviceFromKey(c);
+  return json({ name: dev.name, url: `/kiosk/${await kioskToken(c.env.SECRET_KEY, dev as { id: number; key: string })}` });
+}
+
 // --- integration API (read-only, Bearer token) -------------------------------------
 
 async function apiPresence(c: Ctx) {
@@ -618,6 +624,7 @@ function route(method: string, path: string, endpoint: string, handler: Handler,
 route("POST", "/api/v1/scan", "api_scan", apiScan, "none");
 route("POST", "/api/v1/sync", "api_sync", apiSync, "none");
 route("GET", "/api/v1/cards", "api_cards", apiCards, "none");
+route("GET", "/api/v1/kiosk", "api_kiosk", apiKiosk, "none");
 route("GET", "/api/v1/presence", "api_presence", apiPresence, "none");
 route("GET", "/api/v1/events", "api_events", apiEvents, "none");
 route("GET,POST", "/login", "login", login, "none");

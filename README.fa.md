@@ -37,6 +37,7 @@
 | `hardware/` | بُرد مدار چاپی حامل (KiCad 10): شماتیک، طرح دولایه، Gerber و تصاویر |
 | `docs/` | راهنمای مونتاژ (فارسی/انگلیسی) و پروپوزال |
 | `cloudflare/` | اختیاری: همین سرور روی Cloudflare Workers ([راهنمای آن](cloudflare/README.md)) |
+| `android/` | اختیاری: برنامهٔ اندروید که گوشی دارای NFC را به دستگاه در با نمایشگر کیوسک تبدیل می‌کند ([راهنمای آن](android/README.md)) |
 
 ---
 
@@ -207,6 +208,7 @@ journalctl -u accessctl -f
 | `POST /api/v1/scan` | `{"uid":"04:A3:1B:2C"}` | `{"granted":true,"result":"granted","name":"سارا","direction":"in","open_ms":3000}` |
 | `POST /api/v1/sync` | `{"fw":"1.0.0","cards_version":"…","events":[…]}` | `{"time":…,"cards_version":"…","open":false,"open_ms":3000}` |
 | `GET /api/v1/cards` | — | سطرهای TSV: `uid⇥1⇥inside⇥name` (فقط کارت‌های معتبر) |
+| `GET /api/v1/kiosk` | — | `{"name":"…","url":"/kiosk/<token>"}` — لینک نمایشگر همین در (برای برنامهٔ اندروید) |
 
 مقدار `result` یکی از `granted | unknown | disabled | expired | denied` است (denied یعنی دستگاه غیرفعال است).
 

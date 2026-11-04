@@ -213,8 +213,10 @@ function addRecent(e) {
 }
 
 // ---- polling ----
-let lastId = 0, first = true;
+let lastId = 0, first = true, pollTimer = null, polling = false;
 async function poll() {
+  if (polling) return;
+  polling = true; clearTimeout(pollTimer);
   try {
     const sep = FEED.includes('?') ? '&' : '?';
     const r = await fetch(FEED + sep + (first ? 'init=1' : 'after=' + lastId), {cache: 'no-store'});
@@ -235,8 +237,11 @@ async function poll() {
     $('errBanner').textContent = '⚠ ارتباط با سرور برقرار نیست' + (err.message && !err.message.startsWith('Failed') ? ' — ' + err.message : '');
     $('errBanner').classList.add('show');
   }
-  setTimeout(poll, 1000);
+  polling = false;
+  pollTimer = setTimeout(poll, 1000);
 }
+// the Android door app calls this right after a card scan so the result shows at once
+window.pollNow = () => { if (!first) poll(); };
 
 // ---- clock ----
 const fmtTime = new Intl.DateTimeFormat('fa-IR', {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false});

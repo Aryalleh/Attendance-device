@@ -38,6 +38,7 @@ You switch modes in the device's own panel (Settings → Mode). No display is ne
 | `hardware/` | Carrier PCB (KiCad 10): schematic, 2-layer layout, gerbers, renders |
 | `docs/` | Assembly guide (EN/FA) and project proposal |
 | `cloudflare/` | Optional: the same server on Cloudflare Workers ([its README](cloudflare/README.md)) |
+| `android/` | Optional: Android app that turns an NFC phone into a door device with a kiosk screen ([its README](android/README.md)) |
 
 ---
 
@@ -225,6 +226,7 @@ All requests carry the header `X-Device-Key: <key>`.
 | `POST /api/v1/scan` | `{"uid":"04:A3:1B:2C"}` | `{"granted":true,"result":"granted","name":"Sara","direction":"in","open_ms":3000}` |
 | `POST /api/v1/sync` | `{"fw":"1.0.0","cards_version":"…","events":[{ts,uid,result,direction}…]}` | `{"time":…,"cards_version":"…","open":false,"open_ms":3000}` |
 | `GET /api/v1/cards` | — | TSV lines `uid⇥1⇥inside⇥name` (valid cards only) |
+| `GET /api/v1/kiosk` | — | `{"name":"Front door","url":"/kiosk/<token>"}` — this door's live-screen link (used by the Android app) |
 
 `result` is one of `granted | unknown | disabled | expired | denied` (denied = device disabled).
 
