@@ -10,6 +10,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # publish the APK as a GitHub Release
     defaults:
       run:
         working-directory: android
@@ -29,3 +31,19 @@ jobs:
         with:
           name: door-kiosk-apk
           path: android/door-kiosk.apk
+
+      # Builds from main are published as a Release, so the newest APK always has this direct link:
+      # https://github.com/Aryalleh/Attendance-device/releases/latest/download/door-kiosk.apk
+      - name: Publish release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-build-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: Android door app (build ${{ github.run_number }})
+          body: |
+            Door kiosk app for Android (NFC phone as an online-only door device).
+            Install `door-kiosk.apk` on the phone; setup steps: android/README.md.
+            Built from ${{ github.sha }}.
+          files: android/door-kiosk.apk
+          make_latest: true

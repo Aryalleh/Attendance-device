@@ -22,7 +22,8 @@ and you can disable it or give it a new key. A phone has no relay, so **Open** f
 
 ## Install
 
-1. Get the APK: GitHub → **Actions → Android app** → latest run → artifact **door-kiosk-apk**.
+1. Download the APK: https://github.com/Aryalleh/Attendance-device/releases/latest/download/door-kiosk.apk
+   (every build of `main` is published under **Releases**).
    You can also build it with Android Studio, or run `./gradlew assembleRelease` in `android/` (needs the Android SDK).
 2. Copy the APK to the phone and install it. Allow "install unknown apps" if Android asks.
 3. On the server, open **Doors → New door** and copy the key.
@@ -82,7 +83,8 @@ From there, **Exit kiosk mode** returns the phone to its normal launcher until y
 
 ### نصب
 
-1. فایل APK را از GitHub بگیرید: **Actions ← Android app** ← آخرین اجرا ← فایل **door-kiosk-apk**.
+1. دانلود APK: https://github.com/Aryalleh/Attendance-device/releases/latest/download/door-kiosk.apk
+   (هر ساخت از شاخهٔ `main` در بخش **Releases** منتشر می‌شود).
 2. APK را روی گوشی نصب کنید.
 3. در پنل سرور **درها ← در جدید** را بزنید و کلید را کپی کنید.
 4. برنامه را باز کنید و **آدرس سرور**، **کلید در** و **رمز مدیر** را وارد کنید و **ذخیره و شروع** را بزنید.
