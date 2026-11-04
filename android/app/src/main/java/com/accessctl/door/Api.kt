@@ -5,7 +5,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** The same device API the Wemos firmware uses (/api/v1/*), authenticated with X-Device-Key. */
+/** The same device API the Wemos firmware uses (the /api/v1 calls), authenticated with X-Device-Key. */
 class Api(private val base: String, private val key: String) {
 
     class Reply(val code: Int, val body: String) {
