@@ -19,13 +19,14 @@
 <tbody>
 {% for d in doors %}
 <tr>
-  <td><b>{{ d.name }}</b>{% if not d.enabled %} <span class="pill bad">غیرفعال</span>{% endif %}</td>
+  <td><b>{{ d.name }}</b>{% if not d.enabled %} <span class="pill bad">غیرفعال</span>{% endif %}{% if d.enroll %} <span class="pill warn" title="کارت‌ها در را باز نمی‌کنند؛ برای ثبت در صفحهٔ «ثبت سریع کارت» نمایش داده می‌شوند">حالت ثبت کارت</span>{% endif %}</td>
   <td class="nowrap"><span class="dot {{ 'on' if d.last_seen and d.last_seen >= online_after else 'off' }}"></span>{{ d.last_seen|ago }}</td>
   <td>{{ {'in':'فقط ورود','out':'فقط خروج','toggle':'ورود/خروج متناوب'}[d.direction] }}</td>
   <td>{{ ('%.1f'|format(d.open_ms / 1000))|fa }} ثانیه</td>
   <td class="mono mut">{{ d.fw or '—' }} · {{ d.last_ip or '—' }}</td>
   <td class="nowrap end">
     <form class="inline" method="post" action="{{ url_for('door_open', door_id=d.id) }}">{{ csrf() }}<button class="btn sm">باز کن</button></form>
+    <form class="inline" method="post" action="{{ url_for('door_enroll', door_id=d.id) }}">{{ csrf() }}<button class="btn sec sm">{{ 'پایان ثبت کارت' if d.enroll else 'حالت ثبت کارت' }}</button></form>
     <a class="btn sec sm" href="{{ kiosk_links[d.id] }}" target="_blank" title="لینک نمایشگر این در برای تبلت/مانیتور کنار در — بدون نیاز به ورود. با «کلید جدید» باطل می‌شود.">نمایشگر</a>
     <details style="display:inline-block;vertical-align:top"><summary class="btn sec sm">ویرایش</summary>
       <div class="box popup">

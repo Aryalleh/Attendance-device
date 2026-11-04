@@ -12,6 +12,7 @@ Environment:
   ACCESSCTL_HOST/PORT    listen address (default 0.0.0.0:8080)
   ACCESSCTL_API_TOKEN    enables the read-only integration API (Bearer token, all companies)
   ACCESSCTL_WEBHOOK_URL  POSTs every access event as JSON to this URL
+  ACCESSCTL_CURRENCY     currency label for plan prices (default تومان)
 """
 import csv
 import functools
@@ -68,9 +69,11 @@ def create_app():
 
     app.teardown_appcontext(store.close_db)
     app.jinja_env.filters.update(jdt=fmt_jdt, jdate=fmt_jdate, jtime=fmt_jtime, ago=fmt_ago,
-                                 fa=J.fa, jinput=jinput, jlong=J.jlong, jstr=J.jstr, hm=fmt_hm, dur=fmt_dur)
+                                 fa=J.fa, jinput=jinput, jlong=J.jlong, jstr=J.jstr, hm=fmt_hm, dur=fmt_dur,
+                                 money=fmt_money, limit=fmt_limit)
     app.jinja_env.globals.update(csrf_token=csrf_token, RESULT_FA=RESULT_FA, DIR_FA=DIR_FA,
-                                 WEEKDAYS_FA=WEEKDAYS_FA, WEEK_ORDER=WEEK_ORDER)
+                                 WEEKDAYS_FA=WEEKDAYS_FA, WEEK_ORDER=WEEK_ORDER, PERIOD_FA=PERIOD_FA,
+                                 LIMIT_FA=LIMIT_FA, CURRENCY=CURRENCY, today_iso=lambda: date.today().isoformat())
     app.before_request(load_user)
     app.before_request(csrf_protect)
     register_routes(app)
@@ -114,6 +117,26 @@ def fmt_jdt(ts):
 def fmt_hm(minutes):
     """Minutes after midnight -> '۱۰:۳۰'."""
     return J.fa(f"{minutes // 60:02d}:{minutes % 60:02d}")
+
+
+CURRENCY = os.environ.get("ACCESSCTL_CURRENCY", "تومان")
+PERIOD_FA = {"day": "روزانه", "week": "هفتگی", "month": "ماهانه", "year": "سالانه"}
+LIMIT_FA = {"users": "کاربر پنل", "devices": "دستگاه", "cards": "کارت", "classes": "کلاس"}
+
+
+def fmt_money(n):
+    """12500000 -> '۱۲٬۵۰۰٬۰۰۰'."""
+    return J.fa(f"{int(n or 0):,}".replace(",", "٬"))
+
+
+def fmt_limit(n):
+    return "نامحدود" if n is None else J.fa(n)
+
+
+def int_or_none(v):
+    """Form value -> int, or None for an empty field (= unlimited)."""
+    v = J.latin((v or "").strip()).replace(",", "").replace("٬", "")
+    return int(v) if v.isdigit() else None
 
 
 def fmt_dur(secs):
@@ -182,6 +205,7 @@ def load_user():
     """g.user: the logged-in user; g.owner: server owner; g.org: the company being viewed."""
     g.user = g.org = None
     g.owner = False
+    g.unread = 0
     if request.path.startswith(("/api/", "/static/", "/kiosk/")):
         return
     uid = session.get("uid")
@@ -202,6 +226,11 @@ def load_user():
         g.org = db.execute("SELECT * FROM orgs WHERE id = ?", (org_id,)).fetchone()
         if g.org is None:
             session.pop("view_org", None)
+    if g.owner:
+        g.unread = db.execute("SELECT COUNT(*) FROM tickets WHERE owner_unread = 1").fetchone()[0]
+    elif g.org is not None:
+        g.unread = db.execute("SELECT COUNT(*) FROM tickets WHERE org_id = ? AND org_unread = 1",
+                              (g.org["id"],)).fetchone()[0]
 
 
 def oid():
@@ -229,6 +258,17 @@ def owner_required(view):
             abort(403)
         return view(*a, **kw)
     return wrapped
+
+
+def check_limit(what):
+    """Flash and return True if the company may not add another `what` (server owners are not limited)."""
+    if g.owner:
+        return False
+    cap = store.over_limit(get_db(), g.org, what)
+    if cap is None:
+        return False
+    flash(f"سقف {LIMIT_FA[what]} در اشتراک شما {J.fa(cap)} است و پر شده. برای افزایش، از صفحهٔ «اشتراک» درخواست بدهید.", "error")
+    return True
 
 
 def own_row(table, row_id):
@@ -365,7 +405,7 @@ def event_filters(args):
 
 RESULT_FA = {"granted": "مجاز", "unknown": "کارت ناشناس", "disabled": "مسدود",
              "expired": "منقضی", "denied": "رد شد", "manual": "باز کردن دستی",
-             "not_member": "عضو کلاس نیست"}
+             "not_member": "عضو کلاس نیست", "enroll": "ثبت کارت"}
 DIR_FA = {"in": "ورود", "out": "خروج", "toggle": "ورود/خروج متناوب"}
 
 EVENT_SELECT = ("SELECT e.*, d.name AS door, k.name AS class_name FROM events e "
@@ -608,6 +648,8 @@ def register_routes(app):
         if clash:
             flash(f"این کارت قبلاً برای «{clash['name']}» ثبت شده است.", "error")
             return None
+        if not card_id and check_limit("cards"):
+            return None
         if card_id:
             db.execute("UPDATE cards SET uid=:uid, name=:name, note=:note, enabled=:enabled, "
                        "valid_until=:valid_until WHERE id=:id AND org_id=:org", {**v, "id": card_id, "org": oid()})
@@ -690,6 +732,8 @@ def register_routes(app):
         if not v["name"]:
             flash("نام در الزامی است.", "error")
             return redirect(url_for("doors"))
+        if check_limit("devices"):
+            return redirect(url_for("doors"))
         db = get_db()
         key = secrets.token_urlsafe(18)
         try:
@@ -740,6 +784,69 @@ def register_routes(app):
         session["new_key"] = {"name": dev["name"], "key": key}
         return redirect(url_for("doors"))
 
+    @app.post("/doors/<int:door_id>/enroll")
+    @login_required
+    def door_enroll(door_id):
+        """Switch a device in/out of card-registration mode."""
+        dev = own_row("devices", door_id)
+        db = get_db()
+        db.execute("UPDATE devices SET enroll = 1 - enroll WHERE id = ?", (door_id,))
+        db.commit()
+        flash(f"«{dev['name']}» " + ("به حالت عادی برگشت." if dev["enroll"] else
+                                    "در حالت ثبت کارت است: کارت‌ها در را باز نمی‌کنند و فقط برای ثبت نمایش داده می‌شوند."), "ok")
+        return redirect(request.referrer or url_for("enroll"))
+
+    # ---- quick card registration ----
+
+    @app.get("/enroll")
+    @login_required
+    def enroll():
+        db = get_db()
+        doors = db.execute("SELECT * FROM devices WHERE org_id = ? ORDER BY name", (oid(),)).fetchall()
+        cls = db.execute("SELECT id, name FROM classes WHERE org_id = ? ORDER BY name", (oid(),)).fetchall()
+        last = db.execute("SELECT COALESCE(MAX(id), 0) FROM events WHERE org_id = ?", (oid(),)).fetchone()[0]
+        return render_template("enroll.html", doors=doors, classes=cls, last_id=last,
+                               online_after=now() - ONLINE_WINDOW)
+
+    @app.get("/enroll/feed")
+    @login_required
+    def enroll_feed():
+        """Cards scanned on registration-mode devices since ?after=<event id>."""
+        db = get_db()
+        rows = db.execute(
+            "SELECT e.id, e.uid, e.ts, d.name AS door, c.id AS card_id, c.name AS card_name FROM events e "
+            "LEFT JOIN devices d ON d.id = e.device_id LEFT JOIN cards c ON c.org_id = e.org_id AND c.uid = e.uid "
+            "WHERE e.org_id = ? AND e.result = 'enroll' AND e.id > ? ORDER BY e.id LIMIT 50",
+            (oid(), request.args.get("after", 0, type=int))).fetchall()
+        return jsonify(events=[{"id": r["id"], "uid": r["uid"], "door": r["door"] or "", "time": fmt_jtime(r["ts"], True),
+                                "card_id": r["card_id"], "name": r["card_name"] or ""} for r in rows])
+
+    @app.post("/enroll/save")
+    @login_required
+    def enroll_save():
+        """Save the name typed in the pop-up: a new card, or rename an existing one. Answers JSON."""
+        db = get_db()
+        uid, name = normalize_uid(request.form.get("uid")), clean_name(request.form.get("name"))
+        if not uid or not name:
+            return jsonify(ok=False, error="نام را وارد کنید.")
+        card = db.execute("SELECT * FROM cards WHERE org_id = ? AND uid = ?", (oid(), uid)).fetchone()
+        if card:
+            db.execute("UPDATE cards SET name = ? WHERE id = ?", (name, card["id"]))
+            card_id = card["id"]
+        else:
+            if not g.owner:
+                cap = store.over_limit(db, g.org, "cards")
+                if cap is not None:
+                    return jsonify(ok=False, error=f"سقف کارت در اشتراک شما {J.fa(cap)} است و پر شده.")
+            card_id = db.execute("INSERT INTO cards(org_id, uid, name, enabled, created_at) VALUES (?, ?, ?, 1, ?)",
+                                 (oid(), uid, name, now())).lastrowid
+        class_id = request.form.get("class", type=int)
+        if class_id and db.execute("SELECT 1 FROM classes WHERE id = ? AND org_id = ?", (class_id, oid())).fetchone():
+            db.execute("INSERT OR IGNORE INTO class_members(class_id, card_id) VALUES (?, ?)", (class_id, card_id))
+        store.bump_cards_rev(db)
+        db.commit()
+        return jsonify(ok=True, card_id=card_id, name=name, renamed=bool(card))
+
     @app.post("/doors/<int:door_id>/delete")
     @login_required
     def door_delete(door_id):
@@ -760,6 +867,8 @@ def register_routes(app):
             name = clean_name(request.form.get("name"), 60)
             if not name:
                 flash("نام کلاس الزامی است.", "error")
+            elif check_limit("classes"):
+                pass
             else:
                 try:
                     cur = db.execute("INSERT INTO classes(org_id, name, note, created_at) VALUES (?, ?, ?, ?)",
@@ -997,7 +1106,8 @@ def register_routes(app):
             if action == "password":
                 change_own_password(db)
             elif action == "add_user":
-                add_user(db, oid())
+                if not check_limit("users"):
+                    add_user(db, oid())
             elif action == "del_user":
                 uid = request.form.get("id", type=int)
                 n = db.execute("SELECT COUNT(*) FROM users WHERE org_id = ?", (oid(),)).fetchone()[0]
@@ -1048,6 +1158,206 @@ def register_routes(app):
         except store.sqlite3.IntegrityError:
             flash("این نام کاربری قبلاً استفاده شده است.", "error")
             return False
+
+    # ---- subscription and support tickets (company side) ----
+
+    def new_ticket(db, org_id, kind, subject, body, **want):
+        t = now()
+        cols = ["org_id", "kind", "subject", "status", "owner_unread", "org_unread", "created_at", "updated_at"] + list(want)
+        vals = [org_id, kind, subject[:120], "open", 1, 0, t, t] + list(want.values())
+        tid = db.execute(f"INSERT INTO tickets({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", vals).lastrowid
+        db.execute("INSERT INTO ticket_messages(ticket_id, author, from_owner, body, created_at) VALUES (?, ?, 0, ?, ?)",
+                   (tid, g.user["username"], body, t))
+        db.commit()
+        return tid
+
+    @app.route("/billing", methods=["GET", "POST"])
+    @login_required
+    def billing():
+        db = get_db()
+        if request.method == "POST":
+            action = request.form.get("action")
+            msg = request.form.get("body", "").strip()[:2000]
+            if action == "plan":
+                plan = db.execute("SELECT * FROM plans WHERE id = ? AND public = 1",
+                                  (request.form.get("plan", type=int),)).fetchone()
+                if plan is None:
+                    abort(404)
+                tid = new_ticket(db, oid(), "plan", f"درخواست پلن «{plan['name']}»",
+                                 msg or f"لطفاً پلن «{plan['name']}» را برای ما فعال کنید.", plan_id=plan["id"])
+            elif action == "custom":
+                period = request.form.get("period") if request.form.get("period") in store.PERIODS else "month"
+                want = {f"want_{k}": int_or_none(request.form.get(k)) for k in store.LIMITS}
+                tid = new_ticket(db, oid(), "custom", "درخواست پلن سفارشی", msg or "پلن سفارشی با مشخصات بالا.",
+                                 want_period=period, **want)
+            else:
+                subject = request.form.get("subject", "").strip()
+                if not subject or not msg:
+                    flash("موضوع و متن پیام را بنویسید.", "error")
+                    return redirect(url_for("billing"))
+                tid = new_ticket(db, oid(), "other", subject, msg)
+            flash("درخواست شما ثبت شد. پاسخ مدیر در همین تیکت نمایش داده می‌شود.", "ok")
+            return redirect(url_for("ticket", ticket_id=tid))
+        plans = db.execute("SELECT * FROM plans WHERE public = 1 ORDER BY price").fetchall()
+        tickets = db.execute("SELECT * FROM tickets WHERE org_id = ? ORDER BY updated_at DESC", (oid(),)).fetchall()
+        current = db.execute("SELECT * FROM plans WHERE id = ?", (g.org["plan_id"],)).fetchone() if g.org["plan_id"] else None
+        payments = db.execute("SELECT * FROM payments WHERE org_id = ? ORDER BY id DESC LIMIT 20", (oid(),)).fetchall()
+        return render_template("billing.html", plans=plans, tickets=tickets, current=current, payments=payments,
+                               usage=store.usage(db, oid()))
+
+    def ticket_view(ticket_id, as_owner):
+        db = get_db()
+        t = db.execute("SELECT t.*, o.name AS org_name, p.name AS plan_name FROM tickets t JOIN orgs o ON o.id = t.org_id "
+                       "LEFT JOIN plans p ON p.id = t.plan_id WHERE t.id = ?", (ticket_id,)).fetchone()
+        if t is None or (not as_owner and t["org_id"] != oid()):
+            abort(404)
+        if request.method == "POST":
+            action = request.form.get("action", "reply")
+            body = request.form.get("body", "").strip()[:4000]
+            if action == "reply" and body:
+                db.execute("INSERT INTO ticket_messages(ticket_id, author, from_owner, body, created_at) VALUES (?, ?, ?, ?, ?)",
+                           (ticket_id, g.user["username"], 1 if as_owner else 0, body, now()))
+                db.execute("UPDATE tickets SET status = 'open', updated_at = ?, owner_unread = ?, org_unread = ? WHERE id = ?",
+                           (now(), 0 if as_owner else 1, 1 if as_owner else 0, ticket_id))
+            elif action in ("close", "reopen"):
+                db.execute("UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?",
+                           ("closed" if action == "close" else "open", now(), ticket_id))
+            db.commit()
+            return redirect(request.path)
+        # reading it marks it read for this side
+        db.execute(f"UPDATE tickets SET {'owner_unread' if as_owner else 'org_unread'} = 0 WHERE id = ?", (ticket_id,))
+        db.commit()
+        msgs = db.execute("SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY id", (ticket_id,)).fetchall()
+        extra = {}
+        if as_owner:
+            org = db.execute("SELECT * FROM orgs WHERE id = ?", (t["org_id"],)).fetchone()
+            plan = db.execute("SELECT * FROM plans WHERE id = ?", (t["plan_id"],)).fetchone() if t["plan_id"] else None
+            # the subscription form starts from what was asked for
+            if plan:
+                proposal = {"plan_id": plan["id"], "period": plan["period"], "price": plan["price"],
+                            **{f"max_{k}": plan[f"max_{k}"] for k in store.LIMITS}}
+            elif t["kind"] == "custom":
+                proposal = {"plan_id": None, "period": t["want_period"], "price": org["price"],
+                            **{f"max_{k}": t[f"want_{k}"] for k in store.LIMITS}}
+            else:
+                proposal = dict(org)
+            extra = {"org": org, "proposal": proposal, "usage": store.usage(db, org["id"]),
+                     "plans": db.execute("SELECT * FROM plans ORDER BY price").fetchall()}
+        return render_template("ticket.html", t=t, msgs=msgs, as_owner=as_owner, **extra)
+
+    @app.route("/tickets/<int:ticket_id>", methods=["GET", "POST"])
+    @login_required
+    def ticket(ticket_id):
+        return ticket_view(ticket_id, as_owner=False)
+
+    # ---- server owner: plans, subscriptions, tickets ----
+
+    @app.route("/admin/plans", methods=["GET", "POST"])
+    @owner_required
+    def admin_plans():
+        db = get_db()
+        if request.method == "POST":
+            action = request.form.get("action")
+            pid = request.form.get("id", type=int)
+            if action == "delete":
+                db.execute("DELETE FROM plans WHERE id = ?", (pid,))
+                db.commit()
+                flash("پلن حذف شد. سازمان‌هایی که روی این پلن بودند محدودیت‌ها و قیمت فعلی خود را نگه می‌دارند.", "ok")
+                return redirect(url_for("admin_plans"))
+            name = clean_name(request.form.get("name"), 60)
+            period = request.form.get("period") if request.form.get("period") in store.PERIODS else "month"
+            v = {"name": name, "period": period, "price": int_or_none(request.form.get("price")) or 0,
+                 "note": request.form.get("note", "").strip()[:300], "public": 1 if request.form.get("public") else 0,
+                 **{f"max_{k}": int_or_none(request.form.get(k)) for k in store.LIMITS}}
+            if not name:
+                flash("نام پلن الزامی است.", "error")
+                return redirect(url_for("admin_plans"))
+            try:
+                if pid:
+                    db.execute("UPDATE plans SET name=:name, period=:period, price=:price, note=:note, public=:public, "
+                               "max_users=:max_users, max_devices=:max_devices, max_cards=:max_cards, "
+                               "max_classes=:max_classes WHERE id=:id", {**v, "id": pid})
+                else:
+                    db.execute("INSERT INTO plans(name, period, price, note, public, max_users, max_devices, max_cards, "
+                               "max_classes, created_at) VALUES (:name, :period, :price, :note, :public, :max_users, "
+                               ":max_devices, :max_cards, :max_classes, :ts)", {**v, "ts": now()})
+                db.commit()
+                flash(f"پلن «{name}» ذخیره شد.", "ok")
+            except store.sqlite3.IntegrityError:
+                flash("پلنی با این نام وجود دارد.", "error")
+            return redirect(url_for("admin_plans"))
+        plans = db.execute("SELECT p.*, (SELECT COUNT(*) FROM orgs WHERE plan_id = p.id) AS n_orgs "
+                           "FROM plans p ORDER BY p.price").fetchall()
+        return render_template("admin_plans.html", plans=plans)
+
+    @app.route("/admin/orgs/<int:org_id>", methods=["GET", "POST"])
+    @owner_required
+    def admin_org(org_id):
+        db = get_db()
+        org = db.execute("SELECT * FROM orgs WHERE id = ?", (org_id,)).fetchone()
+        if org is None:
+            abort(404)
+        if request.method == "POST":
+            action = request.form.get("action")
+            if action == "subscription":
+                plan_id = request.form.get("plan", type=int) or None
+                period = request.form.get("period") if request.form.get("period") in store.PERIODS else None
+                pu_raw = request.form.get("paid_until", "").strip()
+                pu = parse_day(pu_raw)
+                if pu_raw and not pu:
+                    flash("تاریخ پایان اشتراک نامعتبر است.", "error")
+                    return redirect(request.form.get("back") or url_for("admin_org", org_id=org_id))
+                db.execute("UPDATE orgs SET plan_id = ?, period = ?, price = ?, max_users = ?, max_devices = ?, "
+                           "max_cards = ?, max_classes = ?, paid_until = ? WHERE id = ?",
+                           (plan_id, period, int_or_none(request.form.get("price")),
+                            *[int_or_none(request.form.get(k)) for k in store.LIMITS],
+                            pu.isoformat() if pu else None, org_id))
+                tid = request.form.get("ticket", type=int)
+                if tid:
+                    db.execute("INSERT INTO ticket_messages(ticket_id, author, from_owner, body, created_at) VALUES (?, ?, 1, ?, ?)",
+                               (tid, g.user["username"], "اشتراک شما مطابق این درخواست تنظیم شد.", now()))
+                    db.execute("UPDATE tickets SET status = 'closed', org_unread = 1, owner_unread = 0, updated_at = ? "
+                               "WHERE id = ? AND org_id = ?", (now(), tid, org_id))
+                db.commit()
+                flash("اشتراک سازمان ذخیره شد.", "ok")
+            elif action == "payment":
+                n = max(1, request.form.get("count", 1, type=int) or 1)
+                period = org["period"] or "month"
+                until = store.extend_until(org["paid_until"], period, n)
+                amount = int_or_none(request.form.get("amount"))
+                if amount is None:
+                    amount = (org["price"] or 0) * n
+                db.execute("INSERT INTO payments(org_id, amount, paid_until, note, created_at) VALUES (?, ?, ?, ?, ?)",
+                           (org_id, amount, until.isoformat(), request.form.get("note", "").strip()[:200], now()))
+                db.execute("UPDATE orgs SET paid_until = ? WHERE id = ?", (until.isoformat(), org_id))
+                db.commit()
+                flash(f"پرداخت ثبت شد؛ اشتراک تا {J.fa(J.jstr(until))} تمدید شد.", "ok")
+            elif action == "del_payment":
+                db.execute("DELETE FROM payments WHERE id = ? AND org_id = ?", (request.form.get("id", type=int), org_id))
+                db.commit()
+                flash("پرداخت از سوابق حذف شد (تاریخ پایان اشتراک تغییر نکرد).", "ok")
+            return redirect(request.form.get("back") or url_for("admin_org", org_id=org_id))
+        plans = db.execute("SELECT * FROM plans ORDER BY price").fetchall()
+        payments = db.execute("SELECT * FROM payments WHERE org_id = ? ORDER BY id DESC", (org_id,)).fetchall()
+        tickets = db.execute("SELECT * FROM tickets WHERE org_id = ? ORDER BY updated_at DESC LIMIT 20", (org_id,)).fetchall()
+        return render_template("admin_org.html", org=org, plans=plans, payments=payments, tickets=tickets,
+                               usage=store.usage(db, org_id), proposal=dict(org))
+
+    @app.get("/admin/tickets")
+    @owner_required
+    def admin_tickets():
+        status = request.args.get("status", "open")
+        rows = get_db().execute(
+            "SELECT t.*, o.name AS org_name FROM tickets t JOIN orgs o ON o.id = t.org_id "
+            + ("WHERE t.status = ? " if status in ("open", "closed") else "")
+            + "ORDER BY t.owner_unread DESC, t.updated_at DESC LIMIT 200",
+            (status,) if status in ("open", "closed") else ()).fetchall()
+        return render_template("admin_tickets.html", tickets=rows, status=status)
+
+    @app.route("/admin/tickets/<int:ticket_id>", methods=["GET", "POST"])
+    @owner_required
+    def admin_ticket(ticket_id):
+        return ticket_view(ticket_id, as_owner=True)
 
     # ---- server owner: companies and their users ----
 
@@ -1131,8 +1441,10 @@ def register_routes(app):
             "(SELECT COUNT(*) FROM devices WHERE org_id = o.id) AS n_devices, "
             "(SELECT COUNT(*) FROM cards WHERE org_id = o.id) AS n_cards, "
             "(SELECT COUNT(*) FROM classes WHERE org_id = o.id) AS n_classes, "
-            "(SELECT MAX(ts) FROM events WHERE org_id = o.id) AS last_event "
-            "FROM orgs o ORDER BY o.name COLLATE NOCASE").fetchall()
+            "(SELECT MAX(ts) FROM events WHERE org_id = o.id) AS last_event, "
+            "(SELECT COUNT(*) FROM tickets WHERE org_id = o.id AND owner_unread = 1) AS n_unread, "
+            "p.name AS plan_name "
+            "FROM orgs o LEFT JOIN plans p ON p.id = o.plan_id ORDER BY o.name COLLATE NOCASE").fetchall()
         users = db.execute("SELECT id, username, org_id FROM users ORDER BY username").fetchall()
         by_org = {}
         for u in users:

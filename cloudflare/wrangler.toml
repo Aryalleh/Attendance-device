@@ -23,6 +23,8 @@ TZ = "Asia/Tehran"
 # Live door screen refresh (ms). Every poll is one Worker request: the free plan allows
 # 100k requests/day, and each door already uses ~17k/day for its 5-second sync.
 LIVE_POLL_MS = "3000"
+# Currency label shown with plan prices.
+CURRENCY = "تومان"
 
 # Secrets (never put these in this file):
 #   npx wrangler secret put SECRET_KEY              signs login sessions and kiosk links (any long random string)

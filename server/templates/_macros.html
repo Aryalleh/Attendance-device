@@ -27,3 +27,40 @@
 {% endfor %}
 </tbody></table></div>
 {%- endmacro %}
+
+{% macro limits_inputs(v, prefix='max_') -%}
+<div class="row">
+  {% for k in ['users','devices','cards','classes'] %}
+  <div><label>{{ LIMIT_FA[k] }} (خالی = نامحدود)</label><input name="{{ k }}" type="number" dir="ltr" min="0" value="{{ v[prefix ~ k] if v[prefix ~ k] is not none else '' }}"></div>
+  {% endfor %}
+</div>
+{%- endmacro %}
+
+{% macro period_select(name, value) -%}
+<select name="{{ name }}">{% for p, l in PERIOD_FA.items() %}<option value="{{ p }}" {{ 'selected' if value == p }}>{{ l }}</option>{% endfor %}</select>
+{%- endmacro %}
+
+{% macro subscription_form(org, proposal, plans, back='', ticket_id=None) -%}
+<form method="post" action="{{ url_for('admin_org', org_id=org.id) }}">{{ csrf() }}
+  <input type="hidden" name="action" value="subscription"><input type="hidden" name="back" value="{{ back }}">
+  {% if ticket_id %}<input type="hidden" name="ticket" value="{{ ticket_id }}">{% endif %}
+  <div class="row">
+    <div><label>پلن</label><select name="plan" onchange="planPicked(this)"><option value="">سفارشی</option>
+      {% for p in plans %}<option value="{{ p.id }}" {{ 'selected' if proposal.plan_id == p.id }}
+        data-plan='{{ {"period": p.period, "price": p.price, "users": p.max_users, "devices": p.max_devices, "cards": p.max_cards, "classes": p.max_classes}|tojson }}'>{{ p.name }}</option>{% endfor %}</select></div>
+    <div><label>دوره پرداخت</label>{{ period_select('period', proposal.period or 'month') }}</div>
+    <div><label>مبلغ هر دوره ({{ CURRENCY }})</label><input name="price" type="number" dir="ltr" min="0" value="{{ proposal.price if proposal.price is not none else '' }}"></div>
+    <div><label>اشتراک تا تاریخ</label><input name="paid_until" dir="ltr" value="{{ org.paid_until|jinput }}" placeholder="خالی = بدون تاریخ"></div>
+  </div>
+  {{ limits_inputs(proposal) }}
+  <p><button class="btn">{{ 'اعمال روی سازمان و بستن تیکت' if ticket_id else 'ذخیره اشتراک' }}</button></p>
+</form>
+<script>
+function planPicked(sel) {
+  const o = sel.selectedOptions[0]; if (!o || !o.dataset.plan) return;
+  const p = JSON.parse(o.dataset.plan), f = sel.form;
+  f.period.value = p.period; f.price.value = p.price;
+  for (const k of ['users','devices','cards','classes']) f[k].value = p[k] ?? '';
+}
+</script>
+{%- endmacro %}

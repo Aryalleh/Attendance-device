@@ -77,7 +77,7 @@ def connect(path):
 
 
 MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations")
-MIGRATIONS = [(2, "0002_multitenant.sql")]
+MIGRATIONS = [(2, "0002_multitenant.sql"), (3, "0003_plans_enroll.sql")]
 
 
 def init_db(path):
@@ -232,6 +232,9 @@ def decide(db, dev, org_enabled, card, ts):
     out = {"result": "denied", "direction": "", "class_id": None, "slot_id": None, "session_date": None}
     if not org_enabled or not dev["enabled"]:
         return out
+    if dev["enroll"]:
+        out["result"] = "enroll"     # card-registration mode: just report the card to the panel
+        return out
     if card is None:
         out["result"] = "unknown"
         return out
@@ -357,3 +360,29 @@ def class_summary(db, cls, sessions, now_ts):
     for t in tot.values():
         t["pct"] = round(100 * t["secs"] / possible) if possible else 0
     return list(tot.values()), counts
+
+
+# --- plans and limits --------------------------------------------------------------
+
+PERIODS = {"day": 1, "week": 7, "month": 30, "year": 365}     # days one paid period covers
+LIMITS = {"users": "users", "devices": "devices", "cards": "cards", "classes": "classes"}   # limit -> table
+
+
+def usage(db, org_id):
+    return {k: db.execute(f"SELECT COUNT(*) FROM {t} WHERE org_id = ?", (org_id,)).fetchone()[0]
+            for k, t in LIMITS.items()}
+
+
+def over_limit(db, org, what):
+    """The company's limit for `what` if it is already used up (so nothing more may be added), else None."""
+    cap = org["max_" + what]
+    if cap is None:
+        return None
+    used = db.execute(f"SELECT COUNT(*) FROM {LIMITS[what]} WHERE org_id = ?", (org["id"],)).fetchone()[0]
+    return cap if used >= cap else None
+
+
+def extend_until(paid_until, period, count):
+    """New subscription end date after paying `count` periods (counted from today if already expired)."""
+    start = max(date.today(), date.fromisoformat(paid_until)) if paid_until else date.today()
+    return start + timedelta(days=PERIODS.get(period, 30) * count)

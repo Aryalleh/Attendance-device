@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, limits_inputs, period_select %}
+{% block title %}اشتراک · کنترل تردد{% endblock %}
+{% block body %}
+<h1>اشتراک و پشتیبانی</h1>
+
+<div class="grid">
+  <div class="box">
+    <h2>اشتراک فعلی</h2>
+    <p>پلن: <b>{{ current.name if current else ('سفارشی' if g.org.price is not none else '—') }}</b>
+      {% if g.org.price is not none %} · {{ g.org.price|money }} {{ CURRENCY }} {{ PERIOD_FA.get(g.org.period, '') }}{% endif %}</p>
+    <p>اعتبار تا: {% if g.org.paid_until %}<b>{{ g.org.paid_until|jinput|fa }}</b>
+      {% if g.org.paid_until < today_iso() %}<span class="pill bad">منقضی</span>{% endif %}{% else %}<span class="mut">—</span>{% endif %}</p>
+    <table>
+      <thead><tr><th></th><th>استفاده شده</th><th>سقف</th></tr></thead>
+      {% for k in ['users','devices','cards','classes'] %}
+      <tr><td>{{ LIMIT_FA[k] }}</td><td>{{ usage[k]|fa }}</td><td>{{ g.org['max_' ~ k]|limit }}</td></tr>
+      {% endfor %}
+    </table>
+    {% if payments %}
+    <h3>پرداخت‌ها</h3>
+    {% for p in payments %}<div class="mut">{{ p.created_at|jdate }} · {{ p.amount|money }} {{ CURRENCY }} · تا {{ p.paid_until|jinput|fa }}</div>{% endfor %}
+    {% endif %}
+  </div>
+
+  <div class="box">
+    <h2>پلن سفارشی</h2>
+    <p class="mut">تعداد مورد نیاز را بنویسید؛ مدیر سرور قیمت را اعلام و پلن را فعال می‌کند.</p>
+    <form method="post">{{ csrf() }}<input type="hidden" name="action" value="custom">
+      {{ limits_inputs({}) }}
+      <label>دوره پرداخت</label>{{ period_select('period', 'month') }}
+      <label>توضیحات</label><textarea name="body" rows="2" maxlength="2000"></textarea>
+      <p><button class="btn">ارسال درخواست</button></p>
+    </form>
+  </div>
+</div>
+
+<h2>پلن‌ها</h2>
+<div class="grid">
+  {% for p in plans %}
+  <div class="box">
+    <h2>{{ p.name }} {% if g.org.plan_id == p.id %}<span class="pill ok">پلن فعلی</span>{% endif %}</h2>
+    <p style="font-size:22px;margin:4px 0"><b>{{ p.price|money }}</b> <span class="mut">{{ CURRENCY }} / {{ PERIOD_FA[p.period] }}</span></p>
+    {% for k in ['users','devices','cards','classes'] %}<div>{{ p['max_' ~ k]|limit }} {{ LIMIT_FA[k] }}</div>{% endfor %}
+    {% if p.note %}<p class="mut">{{ p.note }}</p>{% endif %}
+    <form method="post">{{ csrf() }}<input type="hidden" name="action" value="plan"><input type="hidden" name="plan" value="{{ p.id }}">
+      <p><button class="btn sm">درخواست این پلن</button></p></form>
+  </div>
+  {% else %}
+  <div class="box"><p class="mut">هنوز پلنی تعریف نشده است. از فرم «پلن سفارشی» یا یک تیکت استفاده کنید.</p></div>
+  {% endfor %}
+</div>
+
+<div class="box">
+  <h2>تیکت‌ها</h2>
+  <table>
+    <thead><tr><th>موضوع</th><th>وضعیت</th><th>آخرین تغییر</th></tr></thead>
+    {% for t in tickets %}
+    <tr><td><a href="{{ url_for('ticket', ticket_id=t.id) }}">{{ t.subject }}</a>{% if t.org_unread %} <span class="pill bad">پاسخ جدید</span>{% endif %}</td>
+      <td>{% if t.status == 'open' %}<span class="pill ok">باز</span>{% else %}<span class="pill mut">بسته</span>{% endif %}</td>
+      <td class="mut">{{ t.updated_at|ago }}</td></tr>
+    {% else %}
+    <tr><td colspan="3" class="mut">تیکتی ندارید.</td></tr>
+    {% endfor %}
+  </table>
+  <h3>تیکت جدید</h3>
+  <form method="post">{{ csrf() }}<input type="hidden" name="action" value="other">
+    <label>موضوع</label><input name="subject" maxlength="120" required>
+    <label>پیام</label><textarea name="body" rows="3" maxlength="2000" required></textarea>
+    <p><button class="btn">ارسال</button></p>
+  </form>
+</div>
+{% endblock %}

@@ -2,7 +2,7 @@
 // Same device API (/api/v1/*) as the Flask server, so the Wemos firmware works with either.
 import { checkPassword, hashPassword, kioskMatches, kioskPayload, kioskToken, randomToken, safeEqual, Session } from "./auth";
 import {
-  activeSlots, addEvent, all, bumpCardsRev, cardsVersion, cardsWithPresence, cardValid, classSessions, classSummary,
+  activeSlots, addEvent, all, bumpCardsRev, extendUntil, Limit, LIMITS, overLimit, PERIODS, usage, cardsVersion, cardsWithPresence, cardValid, classSessions, classSummary,
   cleanName, decide, Decision, EARLY_MIN, EVENT_SELECT, first, isMember, isUniqueError, normalizeUid, Row, run,
   sessionReport, slotOn, stmt,
 } from "./db";
@@ -21,6 +21,7 @@ export interface Env {
   ACCESSCTL_WEBHOOK_URL?: string;  // POSTs every access event as JSON
   TZ?: string;                     // panel time zone (wrangler.toml [vars])
   LIVE_POLL_MS?: string;           // live screen refresh; each poll is one Worker request
+  CURRENCY?: string;               // shown with plan prices (default تومان)
 }
 
 const ONLINE_WINDOW = 30;   // a door counts as online if it synced within this many seconds
@@ -40,6 +41,7 @@ type Ctx = {
   user: Row | null;      // logged-in user
   owner: boolean;        // server owner (no company of their own)
   org: Row | null;       // company being viewed
+  unread: number;        // tickets with news for this user
   waitUntil: (p: Promise<unknown>) => void;
   form?: FormData;
   endpoint: string;
@@ -66,6 +68,7 @@ const back = (c: Ctx, fallback: string) => {
 function pageCtx(c: Ctx): V.PageCtx {
   return {
     user: c.user?.username, userId: c.user?.id, owner: c.owner, orgName: c.org?.name,
+    paidUntil: c.org?.paid_until, unread: c.unread,
     endpoint: c.endpoint, csrf: c.session.csrfToken(), flashes: c.session.popFlashes(),
   };
 }
@@ -96,6 +99,27 @@ async function loadUser(c: Ctx) {
     c.org = await first(c.db, "SELECT * FROM orgs WHERE id = ?", orgId);
     if (!c.org) c.session.set("view_org", undefined);
   }
+  const n = c.owner
+    ? await first(c.db, "SELECT COUNT(*) AS n FROM tickets WHERE owner_unread = 1")
+    : c.org ? await first(c.db, "SELECT COUNT(*) AS n FROM tickets WHERE org_id = ? AND org_unread = 1", c.org.id) : null;
+  c.unread = n?.n || 0;
+}
+
+const LIMIT_FA = V.LIMIT_FA;
+
+/** Flash and return true if the company may not add another `what` (server owners are not limited). */
+async function checkLimit(c: Ctx, what: Limit): Promise<boolean> {
+  if (c.owner) return false;
+  const cap = await overLimit(c.db, c.org!, what);
+  if (cap === null) return false;
+  c.session.flash(`سقف ${LIMIT_FA[what]} در اشتراک شما ${J.fa(cap)} است و پر شده. برای افزایش، از صفحهٔ «اشتراک» درخواست بدهید.`, "error");
+  return true;
+}
+
+/** Form value -> int, or null for an empty field (= unlimited). */
+function intOrNull(v: string): number | null {
+  const t = J.latin(v.trim()).replace(/[,٬]/g, "");
+  return /^\d+$/.test(t) ? Number(t) : null;
 }
 
 const validPassword = (pw: string) => pw.length >= 8;
@@ -455,6 +479,7 @@ async function saveCard(c: Ctx, cardId: number | null): Promise<boolean> {
     c.session.flash(`این کارت قبلاً برای «${clash.name}» ثبت شده است.`, "error");
     return false;
   }
+  if (!cardId && (await checkLimit(c, "cards"))) return false;
   const write = cardId
     ? stmt(c.db, "UPDATE cards SET uid=?, name=?, note=?, enabled=?, valid_until=? WHERE id=? AND org_id=?",
       uid, name, note, enabled, validUntil, cardId, oid(c))
@@ -524,6 +549,7 @@ async function doorNew(c: Ctx) {
     c.session.flash("نام در الزامی است.", "error");
     return redirect("/doors");
   }
+  if (await checkLimit(c, "devices")) return redirect("/doors");
   const key = randomToken(18);
   try {
     await run(c.db, "INSERT INTO devices(org_id, name, key, direction, open_ms, enabled) VALUES (?, ?, ?, ?, ?, 1)",
@@ -583,7 +609,7 @@ async function classesList(c: Ctx) {
     const name = cleanName(formStr(c, "name"), 60);
     if (!name) {
       c.session.flash("نام کلاس الزامی است.", "error");
-    } else {
+    } else if (!(await checkLimit(c, "classes"))) {
       try {
         const r = await run(c.db, "INSERT INTO classes(org_id, name, note, created_at) VALUES (?, ?, ?, ?)",
           oid(c), name, Array.from(formStr(c, "note").trim()).slice(0, 200).join(""), now());
@@ -740,6 +766,261 @@ async function classSession(c: Ctx, id: number, slotId: number, day: string) {
   return page(V.classSessionPage(pageCtx(c), { cls, slot: slot!, day, now: t, rep }));
 }
 
+// --- quick card registration ---------------------------------------------------------
+
+async function doorEnroll(c: Ctx, id: number) {
+  const dev = await ownRow(c, "devices", id);
+  await run(c.db, "UPDATE devices SET enroll = 1 - enroll WHERE id = ?", id);
+  c.session.flash(`«${dev.name}» ` + (dev.enroll ? "به حالت عادی برگشت."
+    : "در حالت ثبت کارت است: کارت‌ها در را باز نمی‌کنند و فقط برای ثبت نمایش داده می‌شوند."), "ok");
+  return back(c, "/enroll");
+}
+
+async function enroll(c: Ctx) {
+  const [doorList, classList, last] = await Promise.all([
+    all(c.db, "SELECT * FROM devices WHERE org_id = ? ORDER BY name", oid(c)),
+    all(c.db, "SELECT id, name FROM classes WHERE org_id = ? ORDER BY name", oid(c)),
+    first(c.db, "SELECT COALESCE(MAX(id), 0) AS n FROM events WHERE org_id = ?", oid(c)),
+  ]);
+  return page(V.enrollPage(pageCtx(c), { doors: doorList, classes: classList, lastId: last?.n || 0, onlineAfter: now() - ONLINE_WINDOW }));
+}
+
+/** Cards scanned on registration-mode devices since ?after=<event id>. */
+async function enrollFeed(c: Ctx) {
+  const rows = await all(c.db,
+    `SELECT e.id, e.uid, e.ts, d.name AS door, k.id AS card_id, k.name AS card_name FROM events e
+     LEFT JOIN devices d ON d.id = e.device_id LEFT JOIN cards k ON k.org_id = e.org_id AND k.uid = e.uid
+     WHERE e.org_id = ? AND e.result = 'enroll' AND e.id > ? ORDER BY e.id LIMIT 50`,
+    oid(c), intArg(c.url.searchParams.get("after")));
+  return json({ events: rows.map((r) => ({ id: r.id, uid: r.uid, door: r.door || "", time: jtime(r.ts, true), card_id: r.card_id, name: r.card_name || "" })) });
+}
+
+/** Save the name typed in the pop-up: a new card, or rename an existing one. Answers JSON. */
+async function enrollSave(c: Ctx) {
+  const uid = normalizeUid(formStr(c, "uid")), name = cleanName(formStr(c, "name"));
+  if (!uid || !name) return json({ ok: false, error: "نام را وارد کنید." });
+  const card = await first(c.db, "SELECT * FROM cards WHERE org_id = ? AND uid = ?", oid(c), uid);
+  let cardId: number;
+  if (card) {
+    await run(c.db, "UPDATE cards SET name = ? WHERE id = ?", name, card.id);
+    cardId = card.id;
+  } else {
+    if (!c.owner) {
+      const cap = await overLimit(c.db, c.org!, "cards");
+      if (cap !== null) return json({ ok: false, error: `سقف کارت در اشتراک شما ${J.fa(cap)} است و پر شده.` });
+    }
+    const r = await run(c.db, "INSERT INTO cards(org_id, uid, name, enabled, created_at) VALUES (?, ?, ?, 1, ?)", oid(c), uid, name, now());
+    cardId = r.meta.last_row_id;
+  }
+  const classId = intArg(formStr(c, "class"));
+  const writes = [bumpCardsRev(c.db)];
+  if (classId && (await first(c.db, "SELECT 1 AS x FROM classes WHERE id = ? AND org_id = ?", classId, oid(c)))) {
+    writes.push(stmt(c.db, "INSERT OR IGNORE INTO class_members(class_id, card_id) VALUES (?, ?)", classId, cardId));
+  }
+  await c.db.batch(writes);
+  return json({ ok: true, card_id: cardId, name, renamed: Boolean(card) });
+}
+
+// --- subscription and support tickets (company side) -----------------------------------
+
+async function newTicket(c: Ctx, orgId: number, kind: string, subject: string, body: string, want: Record<string, unknown> = {}) {
+  const t = now();
+  const cols = ["org_id", "kind", "subject", "status", "owner_unread", "org_unread", "created_at", "updated_at", ...Object.keys(want)];
+  const vals = [orgId, kind, Array.from(subject).slice(0, 120).join(""), "open", 1, 0, t, t, ...Object.values(want)];
+  const r = await run(c.db, `INSERT INTO tickets(${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`, ...vals);
+  const tid = r.meta.last_row_id;
+  await run(c.db, "INSERT INTO ticket_messages(ticket_id, author, from_owner, body, created_at) VALUES (?, ?, 0, ?, ?)", tid, c.user!.username, body, t);
+  return tid;
+}
+
+async function billing(c: Ctx) {
+  if (c.req.method === "POST") {
+    const action = formStr(c, "action");
+    const msg = Array.from(formStr(c, "body").trim()).slice(0, 2000).join("");
+    let tid: number;
+    if (action === "plan") {
+      const plan = await first(c.db, "SELECT * FROM plans WHERE id = ? AND public = 1", intArg(formStr(c, "plan")));
+      if (!plan) abort(404);
+      tid = await newTicket(c, oid(c), "plan", `درخواست پلن «${plan!.name}»`, msg || `لطفاً پلن «${plan!.name}» را برای ما فعال کنید.`, { plan_id: plan!.id });
+    } else if (action === "custom") {
+      const period = PERIODS[formStr(c, "period")] ? formStr(c, "period") : "month";
+      const want: Record<string, unknown> = { want_period: period };
+      for (const k of LIMITS) want[`want_${k}`] = intOrNull(formStr(c, k));
+      tid = await newTicket(c, oid(c), "custom", "درخواست پلن سفارشی", msg || "پلن سفارشی با مشخصات بالا.", want);
+    } else {
+      const subject = formStr(c, "subject").trim();
+      if (!subject || !msg) {
+        c.session.flash("موضوع و متن پیام را بنویسید.", "error");
+        return redirect("/billing");
+      }
+      tid = await newTicket(c, oid(c), "other", subject, msg);
+    }
+    c.session.flash("درخواست شما ثبت شد. پاسخ مدیر در همین تیکت نمایش داده می‌شود.", "ok");
+    return redirect(`/tickets/${tid}`);
+  }
+  const org = c.org!;
+  const [plans, tickets, current, payments, use] = await Promise.all([
+    all(c.db, "SELECT * FROM plans WHERE public = 1 ORDER BY price"),
+    all(c.db, "SELECT * FROM tickets WHERE org_id = ? ORDER BY updated_at DESC", org.id),
+    org.plan_id ? first(c.db, "SELECT * FROM plans WHERE id = ?", org.plan_id) : Promise.resolve(null),
+    all(c.db, "SELECT * FROM payments WHERE org_id = ? ORDER BY id DESC LIMIT 20", org.id),
+    usage(c.db, org.id),
+  ]);
+  return page(V.billingPage(pageCtx(c), { org, plans, tickets, current, payments, usage: use }));
+}
+
+async function ticketView(c: Ctx, id: number, asOwner: boolean) {
+  const t = await first(c.db,
+    `SELECT t.*, o.name AS org_name, p.name AS plan_name FROM tickets t JOIN orgs o ON o.id = t.org_id
+     LEFT JOIN plans p ON p.id = t.plan_id WHERE t.id = ?`, id);
+  if (!t || (!asOwner && t.org_id !== oid(c))) abort(404);
+  if (c.req.method === "POST") {
+    const action = formStr(c, "action") || "reply";
+    const body = Array.from(formStr(c, "body").trim()).slice(0, 4000).join("");
+    if (action === "reply" && body) {
+      await c.db.batch([
+        stmt(c.db, "INSERT INTO ticket_messages(ticket_id, author, from_owner, body, created_at) VALUES (?, ?, ?, ?, ?)",
+          id, c.user!.username, asOwner ? 1 : 0, body, now()),
+        stmt(c.db, "UPDATE tickets SET status = 'open', updated_at = ?, owner_unread = ?, org_unread = ? WHERE id = ?",
+          now(), asOwner ? 0 : 1, asOwner ? 1 : 0, id),
+      ]);
+    } else if (action === "close" || action === "reopen") {
+      await run(c.db, "UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?", action === "close" ? "closed" : "open", now(), id);
+    }
+    return redirect(c.url.pathname);
+  }
+  // reading it marks it read for this side
+  await run(c.db, `UPDATE tickets SET ${asOwner ? "owner_unread" : "org_unread"} = 0 WHERE id = ?`, id);
+  if (asOwner && t!.owner_unread) c.unread = Math.max(0, c.unread - 1);
+  if (!asOwner && t!.org_unread) c.unread = Math.max(0, c.unread - 1);
+  const msgs = await all(c.db, "SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY id", id);
+  if (!asOwner) return page(V.ticketPage(pageCtx(c), { t: t!, msgs, asOwner, path: c.url.pathname }));
+
+  const [org, plan, plans] = await Promise.all([
+    first(c.db, "SELECT * FROM orgs WHERE id = ?", t!.org_id),
+    t!.plan_id ? first(c.db, "SELECT * FROM plans WHERE id = ?", t!.plan_id) : Promise.resolve(null),
+    all(c.db, "SELECT * FROM plans ORDER BY price"),
+  ]);
+  // the subscription form starts from what was asked for
+  let proposal: Row;
+  if (plan) {
+    proposal = { plan_id: plan.id, period: plan.period, price: plan.price };
+    for (const k of LIMITS) proposal[`max_${k}`] = plan[`max_${k}`];
+  } else if (t!.kind === "custom") {
+    proposal = { plan_id: null, period: t!.want_period, price: org!.price };
+    for (const k of LIMITS) proposal[`max_${k}`] = t![`want_${k}`];
+  } else proposal = org!;
+  return page(V.ticketPage(pageCtx(c), {
+    t: t!, msgs, asOwner, path: c.url.pathname, org: org!, proposal, usage: await usage(c.db, org!.id), plans,
+  }));
+}
+
+const ticket = (c: Ctx, id: number) => ticketView(c, id, false);
+const adminTicket = (c: Ctx, id: number) => ticketView(c, id, true);
+
+// --- server owner: plans, subscriptions, tickets -----------------------------------------
+
+async function adminPlans(c: Ctx) {
+  if (c.req.method === "POST") {
+    const action = formStr(c, "action");
+    const pid = intArg(formStr(c, "id"));
+    if (action === "delete") {
+      await run(c.db, "DELETE FROM plans WHERE id = ?", pid);
+      c.session.flash("پلن حذف شد. سازمان‌هایی که روی این پلن بودند محدودیت‌ها و قیمت فعلی خود را نگه می‌دارند.", "ok");
+      return redirect("/admin/plans");
+    }
+    const name = cleanName(formStr(c, "name"), 60);
+    if (!name) {
+      c.session.flash("نام پلن الزامی است.", "error");
+      return redirect("/admin/plans");
+    }
+    const period = PERIODS[formStr(c, "period")] ? formStr(c, "period") : "month";
+    const v = [name, period, intOrNull(formStr(c, "price")) || 0, Array.from(formStr(c, "note").trim()).slice(0, 300).join(""),
+      formStr(c, "public") ? 1 : 0, ...LIMITS.map((k) => intOrNull(formStr(c, k)))];
+    try {
+      if (pid) {
+        await run(c.db, `UPDATE plans SET name=?, period=?, price=?, note=?, public=?, max_users=?, max_devices=?, max_cards=?,
+          max_classes=? WHERE id=?`, ...v, pid);
+      } else {
+        await run(c.db, `INSERT INTO plans(name, period, price, note, public, max_users, max_devices, max_cards, max_classes, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, ...v, now());
+      }
+      c.session.flash(`پلن «${name}» ذخیره شد.`, "ok");
+    } catch (e) {
+      if (!isUniqueError(e)) throw e;
+      c.session.flash("پلنی با این نام وجود دارد.", "error");
+    }
+    return redirect("/admin/plans");
+  }
+  const plans = await all(c.db, "SELECT p.*, (SELECT COUNT(*) FROM orgs WHERE plan_id = p.id) AS n_orgs FROM plans p ORDER BY p.price");
+  return page(V.adminPlansPage(pageCtx(c), { plans }));
+}
+
+async function adminOrg(c: Ctx, id: number) {
+  const org = await first(c.db, "SELECT * FROM orgs WHERE id = ?", id);
+  if (!org) abort(404);
+  const backTo = () => {
+    const b = formStr(c, "back");
+    return redirect(b.startsWith("/") && !b.startsWith("//") ? b : `/admin/orgs/${id}`);
+  };
+  if (c.req.method === "POST") {
+    const action = formStr(c, "action");
+    if (action === "subscription") {
+      const period = PERIODS[formStr(c, "period")] ? formStr(c, "period") : null;
+      const puRaw = formStr(c, "paid_until").trim();
+      const pu = J.parse(puRaw);
+      if (puRaw && !pu) {
+        c.session.flash("تاریخ پایان اشتراک نامعتبر است.", "error");
+        return backTo();
+      }
+      const writes = [stmt(c.db,
+        "UPDATE orgs SET plan_id = ?, period = ?, price = ?, max_users = ?, max_devices = ?, max_cards = ?, max_classes = ?, paid_until = ? WHERE id = ?",
+        intArg(formStr(c, "plan")) || null, period, intOrNull(formStr(c, "price")), ...LIMITS.map((k) => intOrNull(formStr(c, k))), pu, id)];
+      const tid = intArg(formStr(c, "ticket"));
+      if (tid) {
+        writes.push(
+          stmt(c.db, "INSERT INTO ticket_messages(ticket_id, author, from_owner, body, created_at) VALUES (?, ?, 1, ?, ?)",
+            tid, c.user!.username, "اشتراک شما مطابق این درخواست تنظیم شد.", now()),
+          stmt(c.db, "UPDATE tickets SET status = 'closed', org_unread = 1, owner_unread = 0, updated_at = ? WHERE id = ? AND org_id = ?", now(), tid, id),
+        );
+      }
+      await c.db.batch(writes);
+      c.session.flash("اشتراک سازمان ذخیره شد.", "ok");
+    } else if (action === "payment") {
+      const n = Math.max(1, intArg(formStr(c, "count"), 1) || 1);
+      const until = extendUntil(org!.paid_until, org!.period || "month", n);
+      let amount = intOrNull(formStr(c, "amount"));
+      if (amount === null) amount = (org!.price || 0) * n;
+      await c.db.batch([
+        stmt(c.db, "INSERT INTO payments(org_id, amount, paid_until, note, created_at) VALUES (?, ?, ?, ?, ?)",
+          id, amount, until, Array.from(formStr(c, "note").trim()).slice(0, 200).join(""), now()),
+        stmt(c.db, "UPDATE orgs SET paid_until = ? WHERE id = ?", until, id),
+      ]);
+      c.session.flash(`پرداخت ثبت شد؛ اشتراک تا ${J.fa(J.jstr(until))} تمدید شد.`, "ok");
+    } else if (action === "del_payment") {
+      await run(c.db, "DELETE FROM payments WHERE id = ? AND org_id = ?", intArg(formStr(c, "id")), id);
+      c.session.flash("پرداخت از سوابق حذف شد (تاریخ پایان اشتراک تغییر نکرد).", "ok");
+    }
+    return backTo();
+  }
+  const [plans, payments, tickets, use] = await Promise.all([
+    all(c.db, "SELECT * FROM plans ORDER BY price"),
+    all(c.db, "SELECT * FROM payments WHERE org_id = ? ORDER BY id DESC", id),
+    all(c.db, "SELECT * FROM tickets WHERE org_id = ? ORDER BY updated_at DESC LIMIT 20", id),
+    usage(c.db, id),
+  ]);
+  return page(V.adminOrgPage(pageCtx(c), { org: org!, plans, payments, tickets, usage: use }));
+}
+
+async function adminTickets(c: Ctx) {
+  const status = c.url.searchParams.get("status") || "open";
+  const filter = status === "open" || status === "closed";
+  const sql = `SELECT t.*, o.name AS org_name FROM tickets t JOIN orgs o ON o.id = t.org_id
+    ${filter ? "WHERE t.status = ?" : ""} ORDER BY t.owner_unread DESC, t.updated_at DESC LIMIT 200`;
+  const tickets = filter ? await all(c.db, sql, status) : await all(c.db, sql);
+  return page(V.adminTicketsPage(pageCtx(c), { tickets, status }));
+}
+
 // --- events / reports ----------------------------------------------------------------------
 
 async function events(c: Ctx) {
@@ -827,7 +1108,9 @@ async function settings(c: Ctx) {
   if (c.req.method === "POST") {
     const action = formStr(c, "action");
     if (action === "password") await changeOwnPassword(c);
-    else if (action === "add_user") await addUser(c, oid(c));
+    else if (action === "add_user") {
+      if (!(await checkLimit(c, "users"))) await addUser(c, oid(c));
+    }
     else if (action === "del_user") {
       const id = intArg(formStr(c, "id"));
       const n = await first(c.db, "SELECT COUNT(*) AS n FROM users WHERE org_id = ?", oid(c));
@@ -923,8 +1206,10 @@ async function admin(c: Ctx) {
          (SELECT COUNT(*) FROM devices WHERE org_id = o.id) AS n_devices,
          (SELECT COUNT(*) FROM cards WHERE org_id = o.id) AS n_cards,
          (SELECT COUNT(*) FROM classes WHERE org_id = o.id) AS n_classes,
-         (SELECT MAX(ts) FROM events WHERE org_id = o.id) AS last_event
-       FROM orgs o ORDER BY o.name COLLATE NOCASE`),
+         (SELECT MAX(ts) FROM events WHERE org_id = o.id) AS last_event,
+         (SELECT COUNT(*) FROM tickets WHERE org_id = o.id AND owner_unread = 1) AS n_unread,
+         p.name AS plan_name
+       FROM orgs o LEFT JOIN plans p ON p.id = o.plan_id ORDER BY o.name COLLATE NOCASE`),
     all(c.db, "SELECT id, username, org_id FROM users ORDER BY username"),
   ]);
   const byOrg = new Map<number | null, Row[]>();
@@ -982,6 +1267,12 @@ route("POST", "/doors/:int", "door_edit", doorEdit);
 route("POST", "/doors/:int/open", "door_open", doorOpen);
 route("POST", "/doors/:int/rekey", "door_rekey", doorRekey);
 route("POST", "/doors/:int/delete", "door_delete", doorDelete);
+route("POST", "/doors/:int/enroll", "door_enroll", doorEnroll);
+route("GET", "/enroll", "enroll", enroll);
+route("GET", "/enroll/feed", "enroll_feed", enrollFeed);
+route("POST", "/enroll/save", "enroll_save", enrollSave);
+route("GET,POST", "/billing", "billing", billing);
+route("GET,POST", "/tickets/:int", "ticket", ticket);
 route("GET", "/events", "events", events);
 route("GET", "/events.csv", "events_csv", eventsCsv);
 route("GET", "/attendance", "attendance", attendance);
@@ -997,6 +1288,10 @@ route("GET", "/classes/:int/session/:int/:token", "class_session", classSession)
 route("GET,POST", "/settings", "settings", settings);
 route("GET,POST", "/admin", "admin", admin, "owner");
 route("POST", "/admin/view", "admin_view", adminView, "owner");
+route("GET,POST", "/admin/plans", "admin_plans", adminPlans, "owner");
+route("GET,POST", "/admin/orgs/:int", "admin_org", adminOrg, "owner");
+route("GET", "/admin/tickets", "admin_tickets", adminTickets, "owner");
+route("GET,POST", "/admin/tickets/:int", "admin_ticket", adminTicket, "owner");
 
 async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(req.url);
@@ -1006,6 +1301,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       : page(V.errorPage(500, "SECRET_KEY تنظیم نشده است: npx wrangler secret put SECRET_KEY"), 500);
   }
   setTimeZone(env.TZ);
+  V.setCurrency(env.CURRENCY);
 
   let match: RegExpMatchArray | null = null;
   let r: Route | undefined;
@@ -1028,7 +1324,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
 
   const session = isApi ? new Session({}, env.SECRET_KEY) : await Session.load(req, env.SECRET_KEY);
   const c: Ctx = {
-    req, env, url, db: env.DB, session, user: null, owner: false, org: null,
+    req, env, url, db: env.DB, session, user: null, owner: false, org: null, unread: 0,
     waitUntil: (p) => ctx.waitUntil(p), endpoint: r.endpoint,
   };
 

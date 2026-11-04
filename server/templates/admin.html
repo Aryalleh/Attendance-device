@@ -7,17 +7,22 @@
 
 <div class="box scroll">
 <table>
-<thead><tr><th>سازمان</th><th>وضعیت</th><th>کاربران</th><th>دستگاه</th><th>کارت</th><th>کلاس</th><th>آخرین تردد</th><th></th></tr></thead>
+<thead><tr><th>سازمان</th><th>وضعیت</th><th>پلن / اعتبار</th><th>کاربران</th><th>دستگاه</th><th>کارت</th><th>کلاس</th><th>آخرین تردد</th><th></th></tr></thead>
 <tbody>
 {% for o in orgs %}
 <tr>
-  <td><b>{{ o.name }}</b></td>
+  <td><a href="{{ url_for('admin_org', org_id=o.id) }}"><b>{{ o.name }}</b></a>{% if o.n_unread %} <span class="pill bad" title="تیکت جدید">{{ o.n_unread|fa }}</span>{% endif %}</td>
   <td>{% if o.enabled %}<span class="pill ok">فعال</span>{% else %}<span class="pill bad">غیرفعال</span>{% endif %}</td>
+  <td class="nowrap">{{ o.plan_name or ('سفارشی' if o.price is not none else '—') }}
+    {% if o.paid_until %}<div class="{{ 'mut' if o.paid_until >= today_iso() else '' }}" style="font-size:12px">{% if o.paid_until < today_iso() %}<span class="pill bad">منقضی</span> {% endif %}تا {{ o.paid_until|jinput|fa }}</div>{% endif %}</td>
   <td class="ltr">{% for u in users.get(o.id, []) %}{{ u.username }}{% if not loop.last %}، {% endif %}{% else %}<span class="mut">—</span>{% endfor %}</td>
-  <td>{{ o.n_devices|fa }}</td><td>{{ o.n_cards|fa }}</td><td>{{ o.n_classes|fa }}</td>
+  <td>{{ o.n_devices|fa }}{% if o.max_devices is not none %}<span class="mut">/{{ o.max_devices|fa }}</span>{% endif %}</td>
+  <td>{{ o.n_cards|fa }}{% if o.max_cards is not none %}<span class="mut">/{{ o.max_cards|fa }}</span>{% endif %}</td>
+  <td>{{ o.n_classes|fa }}{% if o.max_classes is not none %}<span class="mut">/{{ o.max_classes|fa }}</span>{% endif %}</td>
   <td class="nowrap mut">{{ o.last_event|ago }}</td>
   <td class="nowrap end">
     <form class="inline" method="post" action="{{ url_for('admin_view') }}">{{ csrf() }}<input type="hidden" name="org" value="{{ o.id }}"><button class="btn sm">ورود به پنل</button></form>
+    <a class="btn sec sm" href="{{ url_for('admin_org', org_id=o.id) }}">اشتراک</a>
     <details style="display:inline-block;vertical-align:top"><summary class="btn sec sm">مدیریت</summary>
       <div class="box popup" style="min-width:300px">
         <form method="post">{{ csrf() }}<input type="hidden" name="action" value="rename"><input type="hidden" name="org" value="{{ o.id }}">
@@ -46,7 +51,7 @@
   </td>
 </tr>
 {% else %}
-<tr><td colspan="8" class="mut">هنوز سازمانی ساخته نشده است.</td></tr>
+<tr><td colspan="9" class="mut">هنوز سازمانی ساخته نشده است.</td></tr>
 {% endfor %}
 </tbody>
 </table>

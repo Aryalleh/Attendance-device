@@ -13,16 +13,25 @@
   <span class="brand">🔑 {{ g.org.name if g.org else 'کنترل تردد' }}</span>
   <nav>
     {% if g.org %}
-    {% for ep, label in [('live','نمایشگر'),('dashboard','داشبورد'),('cards','کارت‌ها'),('doors','دستگاه‌ها'),('classes','کلاس‌ها'),('events','گزارش تردد'),('attendance','حضور روزانه'),('settings','تنظیمات')] %}
-    <a href="{{ url_for(ep) }}" class="{{ 'on' if request.endpoint == ep or (ep == 'cards' and request.endpoint in ('card_new','card_edit')) or (ep == 'classes' and request.endpoint in ('class_view','class_session')) }}">{{ label }}</a>
+    {% for ep, label in [('live','نمایشگر'),('dashboard','داشبورد'),('cards','کارت‌ها'),('enroll','ثبت سریع کارت'),('doors','دستگاه‌ها'),('classes','کلاس‌ها'),('events','گزارش تردد'),('attendance','حضور روزانه'),('billing','اشتراک'),('settings','تنظیمات')] %}
+    <a href="{{ url_for(ep) }}" class="{{ 'on' if request.endpoint == ep or (ep == 'cards' and request.endpoint in ('card_new','card_edit')) or (ep == 'classes' and request.endpoint in ('class_view','class_session')) or (ep == 'billing' and request.endpoint == 'ticket') }}">{{ label }}{% if ep == 'billing' and g.unread and not g.owner %} <span class="pill bad">{{ g.unread|fa }}</span>{% endif %}</a>
     {% endfor %}
     {% endif %}
-    {% if g.owner %}<a href="{{ url_for('admin') }}" class="{{ 'on' if request.endpoint == 'admin' }}">مدیریت سرور</a>{% endif %}
+    {% if g.owner %}
+    <a href="{{ url_for('admin') }}" class="{{ 'on' if request.endpoint in ('admin','admin_org') }}">مدیریت سرور</a>
+    <a href="{{ url_for('admin_plans') }}" class="{{ 'on' if request.endpoint == 'admin_plans' }}">پلن‌ها</a>
+    <a href="{{ url_for('admin_tickets') }}" class="{{ 'on' if request.endpoint in ('admin_tickets','admin_ticket') }}">تیکت‌ها{% if g.unread %} <span class="pill bad">{{ g.unread|fa }}</span>{% endif %}</a>
+    {% endif %}
   </nav>
   <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="btn sec sm">خروج ({{ g.user.username }})</button></form>
 </div></header>
 {% endif %}
 <main>
+{% if g.org and g.org.paid_until and request.endpoint not in ('live',) %}
+  {% if g.org.paid_until < today_iso() %}
+  <div class="flash error">اشتراک {{ g.org.name }} در تاریخ {{ g.org.paid_until|jinput|fa }} به پایان رسیده است. برای تمدید از صفحهٔ <a href="{{ url_for('billing') }}">اشتراک</a> با مدیر سرور تماس بگیرید.</div>
+  {% endif %}
+{% endif %}
 {% for cat, msg in get_flashed_messages(with_categories=true) %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
 {% block body %}{% endblock %}
 </main>

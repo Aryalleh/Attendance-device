@@ -240,7 +240,8 @@ void handleServerScan(const String& uid) {
         grant(resp["open_ms"] | 3000);
         if (Card* c = cacheCards.find(uid)) { c->inside = dir == "in"; markCardsDirty(); }
       } else {
-        fb.play(result == "unknown" ? Patterns::UNKNOWN : Patterns::DENIED);
+        // "enroll": the device is in card-registration mode on the server; the panel names the card
+        fb.play(result == "enroll" ? Patterns::ENROLLED : result == "unknown" ? Patterns::UNKNOWN : Patterns::DENIED);
       }
       lastUid = uid; lastName = name; lastResult = result; lastTime = nowTs();
       return;

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, subscription_form %}
+{% block title %}{{ t.subject }} · تیکت{% endblock %}
+{% block body %}
+<div class="row" style="margin-bottom:12px">
+  <h1>{{ t.subject }}</h1>
+  {% if t.status == 'open' %}<span class="pill ok auto">باز</span>{% else %}<span class="pill mut auto">بسته</span>{% endif %}
+  <a class="btn sec auto" href="{{ url_for('admin_tickets') if as_owner else url_for('billing') }}">بازگشت</a>
+</div>
+{% if as_owner %}<p class="mut">سازمان: <a href="{{ url_for('admin_org', org_id=t.org_id) }}"><b>{{ t.org_name }}</b></a></p>{% endif %}
+
+{% if t.kind == 'plan' %}
+<div class="box"><b>درخواست پلن:</b> {{ t.plan_name or 'پلن حذف‌شده' }}</div>
+{% elif t.kind == 'custom' %}
+<div class="box"><b>درخواست پلن سفارشی</b> ({{ PERIOD_FA.get(t.want_period, '') }}):
+  {% for k in ['users','devices','cards','classes'] %}{{ t['want_' ~ k]|limit }} {{ LIMIT_FA[k] }}{% if not loop.last %}، {% endif %}{% endfor %}</div>
+{% endif %}
+
+<div class="box">
+  {% for m in msgs %}
+  <div style="padding:10px 12px;margin:8px 0;border-radius:10px;background:{{ 'var(--bg)' if m.from_owner else 'transparent' }};border:1px solid var(--line)">
+    <div class="mut" style="font-size:12px">{{ 'مدیر سرور' if m.from_owner else m.author }} · {{ m.created_at|jdt }}</div>
+    <div style="white-space:pre-wrap">{{ m.body }}</div>
+  </div>
+  {% endfor %}
+  <form method="post">{{ csrf() }}<input type="hidden" name="action" value="reply">
+    <label>پاسخ</label><textarea name="body" rows="3" maxlength="4000" required></textarea>
+    <p class="row"><button class="btn auto">ارسال</button></p>
+  </form>
+  <form method="post">{{ csrf() }}<input type="hidden" name="action" value="{{ 'close' if t.status == 'open' else 'reopen' }}">
+    <button class="btn sec sm">{{ 'بستن تیکت' if t.status == 'open' else 'باز کردن دوباره' }}</button></form>
+</div>
+
+{% if as_owner %}
+<div class="box">
+  <h2>تنظیم اشتراک «{{ org.name }}»</h2>
+  <p class="mut">مقادیر از درخواست پر شده‌اند؛ هر چیزی را که لازم است تغییر دهید. استفادهٔ فعلی:
+    {% for k in ['users','devices','cards','classes'] %}{{ usage[k]|fa }} {{ LIMIT_FA[k] }}{% if not loop.last %}، {% endif %}{% endfor %}</p>
+  {{ subscription_form(org, proposal, plans, back=request.path, ticket_id=t.id) }}
+</div>
+{% endif %}
+{% endblock %}

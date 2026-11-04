@@ -1,14 +1,24 @@
 // Panel pages — port of server/templates/*.html (Persian, RTL).
 import { html, qs, raw, Safe } from "./html";
-import type { ClassSession, MemberTotal, Presence, Row } from "./db";
+import type { ClassSession, Limit, MemberTotal, Presence, Row } from "./db";
 import * as J from "./jalali";
-import { ago, jdt, jinput, jtime } from "./time";
+import { ago, jdate, jdt, jinput, jtime, today } from "./time";
 
 export const WEEKDAYS_FA = ["دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه", "یکشنبه"];   // index = 0=Mon..6=Sun
 const WEEK_ORDER = [5, 6, 0, 1, 2, 3, 4];   // Saturday first
 
 /** Minutes after midnight -> '۱۰:۳۰'. */
 export const hm = (m: number) => J.fa(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
+
+export const PERIOD_FA: Record<string, string> = { day: "روزانه", week: "هفتگی", month: "ماهانه", year: "سالانه" };
+export const LIMIT_FA: Record<string, string> = { users: "کاربر پنل", devices: "دستگاه", cards: "کارت", classes: "کلاس" };
+const LIMIT_KEYS: Limit[] = ["users", "devices", "cards", "classes"];
+let CURRENCY = "تومان";
+export const setCurrency = (c?: string) => { if (c) CURRENCY = c; };
+
+/** 12500000 -> '۱۲٬۵۰۰٬۰۰۰'. */
+export const money = (n: number | null | undefined) => J.fa(Math.trunc(n || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, "٬"));
+export const limit = (n: number | null | undefined) => (n === null || n === undefined ? "نامحدود" : J.fa(n));
 
 /** Seconds -> '۱ ساعت و ۲۵ دقیقه'. */
 export function dur(secs: number): string {
@@ -19,7 +29,7 @@ export function dur(secs: number): string {
 
 export const RESULT_FA: Record<string, string> = {
   granted: "مجاز", unknown: "کارت ناشناس", disabled: "مسدود",
-  expired: "منقضی", denied: "رد شد", manual: "باز کردن دستی", not_member: "عضو کلاس نیست",
+  expired: "منقضی", denied: "رد شد", manual: "باز کردن دستی", not_member: "عضو کلاس نیست", enroll: "ثبت کارت",
 };
 export const DIR_FA: Record<string, string> = { in: "ورود", out: "خروج", toggle: "ورود/خروج متناوب" };
 
@@ -29,6 +39,8 @@ export type PageCtx = {
   userId?: number;
   owner?: boolean;
   orgName?: string;
+  paidUntil?: string | null;   // company's subscription end (for the expiry banner)
+  unread?: number;             // tickets with news for this user
   endpoint: string;
   csrf: string;
   flashes: [string, string][];
@@ -37,13 +49,16 @@ export type PageCtx = {
 const FONT = "/static/fonts/Vazirmatn.woff2";
 const NAV: [string, string, string][] = [
   ["live", "/", "نمایشگر"], ["dashboard", "/dashboard", "داشبورد"], ["cards", "/cards", "کارت‌ها"],
-  ["doors", "/doors", "دستگاه‌ها"], ["classes", "/classes", "کلاس‌ها"], ["events", "/events", "گزارش تردد"],
-  ["attendance", "/attendance", "حضور روزانه"], ["settings", "/settings", "تنظیمات"],
+  ["enroll", "/enroll", "ثبت سریع کارت"], ["doors", "/doors", "دستگاه‌ها"], ["classes", "/classes", "کلاس‌ها"],
+  ["events", "/events", "گزارش تردد"], ["attendance", "/attendance", "حضور روزانه"], ["billing", "/billing", "اشتراک"],
+  ["settings", "/settings", "تنظیمات"],
 ];
 
 export function layout(c: PageCtx, title: string, body: Safe): Safe {
   const navOn = (ep: string) => c.endpoint === ep || (ep === "cards" && (c.endpoint === "card_new" || c.endpoint === "card_edit"))
-    || (ep === "classes" && (c.endpoint === "class_view" || c.endpoint === "class_session"));
+    || (ep === "classes" && (c.endpoint === "class_view" || c.endpoint === "class_session"))
+    || (ep === "billing" && c.endpoint === "ticket");
+  const badge = (n?: number) => (n ? html` <span class="pill bad">${J.fa(n)}</span>` : "");
   return html`<!doctype html>
 <html lang="fa" dir="rtl">
 <head>
@@ -57,12 +72,15 @@ export function layout(c: PageCtx, title: string, body: Safe): Safe {
 ${c.user ? html`<header><div class="in">
   <span class="brand">🔑 ${c.orgName || "کنترل تردد"}</span>
   <nav>
-    ${c.orgName ? NAV.map(([ep, href, label]) => html`<a href="${href}" class="${navOn(ep) ? "on" : ""}">${label}</a>`) : ""}
-    ${c.owner ? html`<a href="/admin" class="${c.endpoint === "admin" ? "on" : ""}">مدیریت سرور</a>` : ""}
+    ${c.orgName ? NAV.map(([ep, href, label]) => html`<a href="${href}" class="${navOn(ep) ? "on" : ""}">${label}${ep === "billing" && !c.owner ? badge(c.unread) : ""}</a>`) : ""}
+    ${c.owner ? html`<a href="/admin" class="${c.endpoint === "admin" || c.endpoint === "admin_org" ? "on" : ""}">مدیریت سرور</a>
+    <a href="/admin/plans" class="${c.endpoint === "admin_plans" ? "on" : ""}">پلن‌ها</a>
+    <a href="/admin/tickets" class="${c.endpoint === "admin_tickets" || c.endpoint === "admin_ticket" ? "on" : ""}">تیکت‌ها${badge(c.unread)}</a>` : ""}
   </nav>
   <form method="post" action="/logout">${csrf(c)}<button class="btn sec sm">خروج (${c.user})</button></form>
 </div></header>` : ""}
 <main>
+${c.orgName && c.paidUntil && c.paidUntil < today() ? html`<div class="flash error">اشتراک ${c.orgName} در تاریخ ${J.fa(jinput(c.paidUntil))} به پایان رسیده است. برای تمدید از صفحهٔ <a href="/billing">اشتراک</a> با مدیر سرور تماس بگیرید.</div>` : ""}
 ${c.flashes.map(([cat, msg]) => html`<div class="flash ${cat}">${msg}</div>`)}
 ${body}
 </main>
@@ -185,6 +203,7 @@ export function cardsPage(c: PageCtx, v: { cards: Row[]; q: string; today: strin
 <div class="row" style="margin-bottom:12px">
   <h1>کارت‌ها</h1>
   <form class="auto" method="get"><input name="q" value="${v.q}" placeholder="جستجوی نام، شناسه، توضیحات"></form>
+  <a class="btn sec auto" href="/enroll">ثبت سریع با کارت‌خوان</a>
   <a class="btn auto" href="/cards/new">+ کارت جدید</a>
 </div>
 <div class="box scroll">
@@ -274,13 +293,14 @@ ${v.newKey ? html`
 <tbody>
 ${v.doors.length ? v.doors.map((d) => html`
 <tr>
-  <td><b>${d.name}</b>${!d.enabled ? html` <span class="pill bad">غیرفعال</span>` : ""}</td>
+  <td><b>${d.name}</b>${!d.enabled ? html` <span class="pill bad">غیرفعال</span>` : ""}${d.enroll ? html` <span class="pill warn" title="کارت‌ها در را باز نمی‌کنند؛ برای ثبت در صفحهٔ «ثبت سریع کارت» نمایش داده می‌شوند">حالت ثبت کارت</span>` : ""}</td>
   <td class="nowrap">${dot(d.last_seen && d.last_seen >= v.onlineAfter)}${ago(d.last_seen)}</td>
   <td>${DIR_LONG[d.direction]}</td>
   <td>${J.fa((d.open_ms / 1000).toFixed(1))} ثانیه</td>
   <td class="mono mut">${d.fw || "—"} · ${d.last_ip || "—"}</td>
   <td class="nowrap end">
     <form class="inline" method="post" action="/doors/${d.id}/open">${csrf(c)}<button class="btn sm">باز کن</button></form>
+    <form class="inline" method="post" action="/doors/${d.id}/enroll">${csrf(c)}<button class="btn sec sm">${d.enroll ? "پایان ثبت کارت" : "حالت ثبت کارت"}</button></form>
     <a class="btn sec sm" href="${v.kioskLinks[d.id]}" target="_blank" title="لینک نمایشگر این در برای تبلت/مانیتور کنار در — بدون نیاز به ورود. با «کلید جدید» باطل می‌شود.">نمایشگر</a>
     <details style="display:inline-block;vertical-align:top"><summary class="btn sec sm">ویرایش</summary>
       <div class="box popup">
@@ -427,19 +447,22 @@ export function adminPage(c: PageCtx, v: { orgs: Row[]; users: Map<number | null
 
 <div class="box scroll">
 <table>
-<thead><tr><th>سازمان</th><th>وضعیت</th><th>کاربران</th><th>دستگاه</th><th>کارت</th><th>کلاس</th><th>آخرین تردد</th><th></th></tr></thead>
+<thead><tr><th>سازمان</th><th>وضعیت</th><th>پلن / اعتبار</th><th>کاربران</th><th>دستگاه</th><th>کارت</th><th>کلاس</th><th>آخرین تردد</th><th></th></tr></thead>
 <tbody>
 ${v.orgs.length ? v.orgs.map((o) => {
     const us = v.users.get(o.id) || [];
     return html`
 <tr>
-  <td><b>${o.name}</b></td>
+  <td><a href="/admin/orgs/${o.id}"><b>${o.name}</b></a>${o.n_unread ? html` <span class="pill bad" title="تیکت جدید">${J.fa(o.n_unread)}</span>` : ""}</td>
   <td>${o.enabled ? html`<span class="pill ok">فعال</span>` : html`<span class="pill bad">غیرفعال</span>`}</td>
+  <td class="nowrap">${o.plan_name || (o.price !== null ? "سفارشی" : "—")}
+    ${o.paid_until ? html`<div style="font-size:12px">${o.paid_until < today() ? html`<span class="pill bad">منقضی</span> ` : ""}تا ${J.fa(jinput(o.paid_until))}</div>` : ""}</td>
   <td class="ltr">${us.length ? us.map((u) => u.username).join("، ") : html`<span class="mut">—</span>`}</td>
-  <td>${J.fa(o.n_devices)}</td><td>${J.fa(o.n_cards)}</td><td>${J.fa(o.n_classes)}</td>
+  <td>${J.fa(o.n_devices)}${capOf(o.max_devices)}</td><td>${J.fa(o.n_cards)}${capOf(o.max_cards)}</td><td>${J.fa(o.n_classes)}${capOf(o.max_classes)}</td>
   <td class="nowrap mut">${ago(o.last_event)}</td>
   <td class="nowrap end">
     <form class="inline" method="post" action="/admin/view">${csrf(c)}${hidden("org", o.id)}<button class="btn sm">ورود به پنل</button></form>
+    <a class="btn sec sm" href="/admin/orgs/${o.id}">اشتراک</a>
     <details style="display:inline-block;vertical-align:top"><summary class="btn sec sm">مدیریت</summary>
       <div class="box popup" style="min-width:300px">
         <form method="post">${csrf(c)}${hidden("action", "rename")}${hidden("org", o.id)}
@@ -466,7 +489,7 @@ ${v.orgs.length ? v.orgs.map((o) => {
     </details>
   </td>
 </tr>`;
-  }) : html`<tr><td colspan="8" class="mut">هنوز سازمانی ساخته نشده است.</td></tr>`}
+  }) : html`<tr><td colspan="9" class="mut">هنوز سازمانی ساخته نشده است.</td></tr>`}
 </tbody>
 </table>
 </div>
@@ -696,6 +719,353 @@ ${r.refused.length ? html`
 function weekdayOf(iso: string): number {
   const [y, m, d] = J.isoParts(iso);
   return (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
+}
+
+// --- plans, subscriptions, tickets, quick card registration ---------------------------
+
+const capOf = (n: number | null) => (n === null || n === undefined ? "" : html`<span class="mut">/${J.fa(n)}</span>`);
+const hiddenIn = (n: string, val: unknown) => html`<input type="hidden" name="${n}" value="${val}">`;
+const val = (v: unknown) => (v === null || v === undefined ? "" : String(v));
+
+function limitsInputs(v: Row, prefix = "max_") {
+  return html`<div class="row">
+  ${LIMIT_KEYS.map((k) => html`<div><label>${LIMIT_FA[k]} (خالی = نامحدود)</label><input name="${k}" type="number" dir="ltr" min="0" value="${val(v[prefix + k])}"></div>`)}
+</div>`;
+}
+
+const periodSelect = (name: string, value: string) =>
+  html`<select name="${name}">${Object.entries(PERIOD_FA).map(([p, l]) => html`<option value="${p}" ${value === p ? "selected" : ""}>${l}</option>`)}</select>`;
+
+function usageTable(org: Row, use: Record<string, number>) {
+  return html`<table>
+  <thead><tr><th></th><th>استفاده شده</th><th>سقف</th></tr></thead>
+  ${LIMIT_KEYS.map((k) => html`<tr><td>${LIMIT_FA[k]}</td><td>${J.fa(use[k])}</td><td>${limit(org["max_" + k])}${org["max_" + k] !== null && use[k] > org["max_" + k] ? html` <span class="pill warn">بیش از سقف</span>` : ""}</td></tr>`)}
+</table>`;
+}
+
+function subscriptionForm(c: PageCtx, org: Row, proposal: Row, plans: Row[], back = "", ticketId?: number) {
+  return html`<form method="post" action="/admin/orgs/${org.id}">${csrf(c)}${hiddenIn("action", "subscription")}${hiddenIn("back", back)}
+  ${ticketId ? hiddenIn("ticket", ticketId) : ""}
+  <div class="row">
+    <div><label>پلن</label><select name="plan" onchange="planPicked(this)"><option value="">سفارشی</option>
+      ${plans.map((p) => html`<option value="${p.id}" ${proposal.plan_id === p.id ? "selected" : ""} data-plan="${JSON.stringify({ period: p.period, price: p.price, users: p.max_users, devices: p.max_devices, cards: p.max_cards, classes: p.max_classes })}">${p.name}</option>`)}</select></div>
+    <div><label>دوره پرداخت</label>${periodSelect("period", proposal.period || "month")}</div>
+    <div><label>مبلغ هر دوره (${CURRENCY})</label><input name="price" type="number" dir="ltr" min="0" value="${val(proposal.price)}"></div>
+    <div><label>اشتراک تا تاریخ</label><input name="paid_until" dir="ltr" value="${jinput(org.paid_until)}" placeholder="خالی = بدون تاریخ"></div>
+  </div>
+  ${limitsInputs(proposal)}
+  <p><button class="btn">${ticketId ? "اعمال روی سازمان و بستن تیکت" : "ذخیره اشتراک"}</button></p>
+</form>
+<script>
+function planPicked(sel) {
+  const o = sel.selectedOptions[0]; if (!o || !o.dataset.plan) return;
+  const p = JSON.parse(o.dataset.plan), f = sel.form;
+  f.period.value = p.period; f.price.value = p.price;
+  for (const k of ['users','devices','cards','classes']) f[k].value = p[k] ?? '';
+}
+</script>`;
+}
+
+const ticketStatus = (t: Row) => (t.status === "open" ? html`<span class="pill ok">باز</span>` : html`<span class="pill mut">بسته</span>`);
+
+export function billingPage(c: PageCtx, v: { org: Row; plans: Row[]; tickets: Row[]; current: Row | null; payments: Row[]; usage: Record<string, number> }) {
+  const o = v.org;
+  return layout(c, "اشتراک · کنترل تردد", html`
+<h1>اشتراک و پشتیبانی</h1>
+<div class="grid">
+  <div class="box">
+    <h2>اشتراک فعلی</h2>
+    <p>پلن: <b>${v.current ? v.current.name : o.price !== null ? "سفارشی" : "—"}</b>
+      ${o.price !== null ? html` · ${money(o.price)} ${CURRENCY} ${PERIOD_FA[o.period] || ""}` : ""}</p>
+    <p>اعتبار تا: ${o.paid_until ? html`<b>${J.fa(jinput(o.paid_until))}</b> ${o.paid_until < today() ? html`<span class="pill bad">منقضی</span>` : ""}` : html`<span class="mut">—</span>`}</p>
+    ${usageTable(o, v.usage)}
+    ${v.payments.length ? html`<h3>پرداخت‌ها</h3>${v.payments.map((p) => html`<div class="mut">${jdate(p.created_at)} · ${money(p.amount)} ${CURRENCY} · تا ${J.fa(jinput(p.paid_until))}</div>`)}` : ""}
+  </div>
+  <div class="box">
+    <h2>پلن سفارشی</h2>
+    <p class="mut">تعداد مورد نیاز را بنویسید؛ مدیر سرور قیمت را اعلام و پلن را فعال می‌کند.</p>
+    <form method="post">${csrf(c)}${hiddenIn("action", "custom")}
+      ${limitsInputs({})}
+      <label>دوره پرداخت</label>${periodSelect("period", "month")}
+      <label>توضیحات</label><textarea name="body" rows="2" maxlength="2000"></textarea>
+      <p><button class="btn">ارسال درخواست</button></p>
+    </form>
+  </div>
+</div>
+
+<h2>پلن‌ها</h2>
+<div class="grid">
+  ${v.plans.length ? v.plans.map((p) => html`
+  <div class="box">
+    <h2>${p.name} ${o.plan_id === p.id ? html`<span class="pill ok">پلن فعلی</span>` : ""}</h2>
+    <p style="font-size:22px;margin:4px 0"><b>${money(p.price)}</b> <span class="mut">${CURRENCY} / ${PERIOD_FA[p.period]}</span></p>
+    ${LIMIT_KEYS.map((k) => html`<div>${limit(p["max_" + k])} ${LIMIT_FA[k]}</div>`)}
+    ${p.note ? html`<p class="mut">${p.note}</p>` : ""}
+    <form method="post">${csrf(c)}${hiddenIn("action", "plan")}${hiddenIn("plan", p.id)}<p><button class="btn sm">درخواست این پلن</button></p></form>
+  </div>`) : html`<div class="box"><p class="mut">هنوز پلنی تعریف نشده است. از فرم «پلن سفارشی» یا یک تیکت استفاده کنید.</p></div>`}
+</div>
+
+<div class="box">
+  <h2>تیکت‌ها</h2>
+  <table>
+    <thead><tr><th>موضوع</th><th>وضعیت</th><th>آخرین تغییر</th></tr></thead>
+    ${v.tickets.length ? v.tickets.map((t) => html`
+    <tr><td><a href="/tickets/${t.id}">${t.subject}</a>${t.org_unread ? html` <span class="pill bad">پاسخ جدید</span>` : ""}</td>
+      <td>${ticketStatus(t)}</td><td class="mut">${ago(t.updated_at)}</td></tr>`) : html`<tr><td colspan="3" class="mut">تیکتی ندارید.</td></tr>`}
+  </table>
+  <h3>تیکت جدید</h3>
+  <form method="post">${csrf(c)}${hiddenIn("action", "other")}
+    <label>موضوع</label><input name="subject" maxlength="120" required>
+    <label>پیام</label><textarea name="body" rows="3" maxlength="2000" required></textarea>
+    <p><button class="btn">ارسال</button></p>
+  </form>
+</div>`);
+}
+
+export function ticketPage(c: PageCtx, v: {
+  t: Row; msgs: Row[]; asOwner: boolean; path: string;
+  org?: Row; proposal?: Row; usage?: Record<string, number>; plans?: Row[];
+}) {
+  const t = v.t;
+  return layout(c, `${t.subject} · تیکت`, html`
+<div class="row" style="margin-bottom:12px">
+  <h1>${t.subject}</h1>
+  <span class="auto">${ticketStatus(t)}</span>
+  <a class="btn sec auto" href="${v.asOwner ? "/admin/tickets" : "/billing"}">بازگشت</a>
+</div>
+${v.asOwner ? html`<p class="mut">سازمان: <a href="/admin/orgs/${t.org_id}"><b>${t.org_name}</b></a></p>` : ""}
+${t.kind === "plan" ? html`<div class="box"><b>درخواست پلن:</b> ${t.plan_name || "پلن حذف‌شده"}</div>`
+  : t.kind === "custom" ? html`<div class="box"><b>درخواست پلن سفارشی</b> (${PERIOD_FA[t.want_period] || ""}):
+    ${LIMIT_KEYS.map((k, i) => html`${limit(t["want_" + k])} ${LIMIT_FA[k]}${i < 3 ? "، " : ""}`)}</div>` : ""}
+<div class="box">
+  ${v.msgs.map((m) => html`
+  <div style="padding:10px 12px;margin:8px 0;border-radius:10px;background:${m.from_owner ? "var(--bg)" : "transparent"};border:1px solid var(--line)">
+    <div class="mut" style="font-size:12px">${m.from_owner ? "مدیر سرور" : m.author} · ${jdt(m.created_at)}</div>
+    <div style="white-space:pre-wrap">${m.body}</div>
+  </div>`)}
+  <form method="post">${csrf(c)}${hiddenIn("action", "reply")}
+    <label>پاسخ</label><textarea name="body" rows="3" maxlength="4000" required></textarea>
+    <p class="row"><button class="btn auto">ارسال</button></p>
+  </form>
+  <form method="post">${csrf(c)}${hiddenIn("action", t.status === "open" ? "close" : "reopen")}
+    <button class="btn sec sm">${t.status === "open" ? "بستن تیکت" : "باز کردن دوباره"}</button></form>
+</div>
+${v.asOwner && v.org ? html`
+<div class="box">
+  <h2>تنظیم اشتراک «${v.org.name}»</h2>
+  <p class="mut">مقادیر از درخواست پر شده‌اند؛ هر چیزی را که لازم است تغییر دهید. استفادهٔ فعلی:
+    ${LIMIT_KEYS.map((k, i) => html`${J.fa(v.usage![k])} ${LIMIT_FA[k]}${i < 3 ? "، " : ""}`)}</p>
+  ${subscriptionForm(c, v.org, v.proposal!, v.plans!, v.path, t.id)}
+</div>` : ""}`);
+}
+
+export function adminPlansPage(c: PageCtx, v: { plans: Row[] }) {
+  return layout(c, "پلن‌ها · مدیریت سرور", html`
+<h1>پلن‌ها</h1>
+<p class="mut">پلن‌های «نمایش به سازمان‌ها» در صفحهٔ اشتراک هر سازمان دیده می‌شوند و سازمان با یک کلیک برای آن تیکت درخواست می‌فرستد. اعمال پلن روی هر سازمان (و هر تغییر سفارشی) از صفحهٔ همان سازمان یا تیکت انجام می‌شود. حذف یا تغییر پلن، روی سازمان‌هایی که قبلاً آن را گرفته‌اند اثری ندارد.</p>
+<div class="grid">
+${v.plans.map((p) => html`
+  <div class="box">
+    <h2>${p.name} ${!p.public ? html`<span class="pill mut">مخفی</span>` : ""}</h2>
+    <p class="mut">${J.fa(p.n_orgs)} سازمان روی این پلن</p>
+    <form method="post">${csrf(c)}${hiddenIn("id", p.id)}
+      <label>نام</label><input name="name" value="${p.name}" maxlength="60" required>
+      <div class="row">
+        <div><label>دوره</label>${periodSelect("period", p.period)}</div>
+        <div><label>قیمت هر دوره (${CURRENCY})</label><input name="price" type="number" dir="ltr" min="0" value="${p.price}"></div>
+      </div>
+      ${limitsInputs(p)}
+      <label>توضیحات</label><input name="note" value="${p.note}" maxlength="300">
+      <label class="check"><input type="checkbox" name="public" value="1" ${p.public ? "checked" : ""}> نمایش به سازمان‌ها</label>
+      <p class="row"><button class="btn auto" name="action" value="save">ذخیره</button>
+        <button class="btn red sm auto" name="action" value="delete" onclick="return confirm('پلن حذف شود؟')">حذف</button></p>
+    </form>
+  </div>`)}
+  <div class="box">
+    <h2>پلن جدید</h2>
+    <form method="post">${csrf(c)}${hiddenIn("action", "save")}
+      <label>نام</label><input name="name" maxlength="60" placeholder="پایه" required>
+      <div class="row">
+        <div><label>دوره</label>${periodSelect("period", "month")}</div>
+        <div><label>قیمت هر دوره (${CURRENCY})</label><input name="price" type="number" dir="ltr" min="0" value="0"></div>
+      </div>
+      ${limitsInputs({})}
+      <label>توضیحات</label><input name="note" maxlength="300">
+      <label class="check"><input type="checkbox" name="public" value="1" checked> نمایش به سازمان‌ها</label>
+      <p><button class="btn">افزودن پلن</button></p>
+    </form>
+  </div>
+</div>`);
+}
+
+export function adminOrgPage(c: PageCtx, v: { org: Row; plans: Row[]; payments: Row[]; tickets: Row[]; usage: Record<string, number> }) {
+  const o = v.org;
+  return layout(c, `${o.name} · مدیریت سرور`, html`
+<div class="row" style="margin-bottom:12px">
+  <h1>${o.name}</h1>
+  ${!o.enabled ? html`<span class="pill bad auto">غیرفعال</span>` : ""}
+  <form class="inline auto" method="post" action="/admin/view">${csrf(c)}${hiddenIn("org", o.id)}<button class="btn sm">ورود به پنل</button></form>
+  <a class="btn sec auto" href="/admin">همه سازمان‌ها</a>
+</div>
+<div class="grid">
+  <div class="box">
+    <h2>استفاده</h2>
+    ${usageTable(o, v.usage)}
+    <p>اعتبار تا: ${o.paid_until ? html`<b>${J.fa(jinput(o.paid_until))}</b>${o.paid_until < today() ? html` <span class="pill bad">منقضی</span>` : ""}` : html`<span class="mut">—</span>`}</p>
+  </div>
+  <div class="box">
+    <h2>ثبت پرداخت</h2>
+    <p class="mut">اشتراک به اندازهٔ تعداد دوره تمدید می‌شود (روزانه ۱، هفتگی ۷، ماهانه ۳۰ و سالانه ۳۶۵ روز)؛ از تاریخ پایان فعلی، یا از امروز اگر منقضی شده باشد.</p>
+    <form method="post">${csrf(c)}${hiddenIn("action", "payment")}
+      <div class="row">
+        <div><label>تعداد دوره (${PERIOD_FA[o.period || "month"]})</label><input name="count" type="number" dir="ltr" min="1" value="1"></div>
+        <div><label>مبلغ (${CURRENCY}، خالی = قیمت × تعداد)</label><input name="amount" type="number" dir="ltr" min="0"></div>
+      </div>
+      <label>یادداشت (شماره پیگیری، روش پرداخت…)</label><input name="note" maxlength="200">
+      <p><button class="btn">ثبت پرداخت و تمدید</button></p>
+    </form>
+    ${v.payments.map((p) => html`
+    <div class="row" style="padding:2px 0"><span class="mut">${jdate(p.created_at)} · ${money(p.amount)} ${CURRENCY} · تا ${J.fa(jinput(p.paid_until))}${p.note ? ` · ${p.note}` : ""}</span>
+      <form class="inline auto" method="post" onsubmit="return confirm('این پرداخت از سوابق حذف شود؟')">${csrf(c)}${hiddenIn("action", "del_payment")}${hiddenIn("id", p.id)}<button class="btn red sm">حذف</button></form></div>`)}
+  </div>
+</div>
+<div class="box">
+  <h2>اشتراک</h2>
+  <p class="mut">پلن را انتخاب کنید تا مقادیر پر شود، یا «سفارشی» بگذارید و هر عدد را خودتان تعیین کنید.</p>
+  ${subscriptionForm(c, o, o, v.plans)}
+</div>
+<div class="box">
+  <h2>تیکت‌ها</h2>
+  ${v.tickets.length ? v.tickets.map((t) => html`
+  <div><a href="/admin/tickets/${t.id}">${t.subject}</a> <span class="mut">· ${ago(t.updated_at)}</span>
+    ${t.owner_unread ? html`<span class="pill bad">جدید</span>` : ""}${t.status === "closed" ? html`<span class="pill mut">بسته</span>` : ""}</div>`)
+    : html`<p class="mut">تیکتی ندارد.</p>`}
+</div>`);
+}
+
+const KIND_FA: Record<string, string> = { plan: "درخواست پلن", custom: "پلن سفارشی", other: "پیام" };
+
+export function adminTicketsPage(c: PageCtx, v: { tickets: Row[]; status: string }) {
+  return layout(c, "تیکت‌ها · مدیریت سرور", html`
+<div class="row" style="margin-bottom:12px">
+  <h1>تیکت‌ها</h1>
+  ${[["open", "باز"], ["closed", "بسته"], ["all", "همه"]].map(([s, l]) => html`<a class="btn ${v.status === s ? "" : "sec"} sm auto" href="/admin/tickets?status=${s}">${l}</a>`)}
+</div>
+<div class="box scroll">
+<table>
+<thead><tr><th>سازمان</th><th>موضوع</th><th>نوع</th><th>وضعیت</th><th>آخرین تغییر</th></tr></thead>
+<tbody>
+${v.tickets.length ? v.tickets.map((t) => html`
+<tr>
+  <td><a href="/admin/orgs/${t.org_id}">${t.org_name}</a></td>
+  <td><a href="/admin/tickets/${t.id}"><b>${t.subject}</b></a>${t.owner_unread ? html` <span class="pill bad">جدید</span>` : ""}</td>
+  <td>${KIND_FA[t.kind]}</td>
+  <td>${ticketStatus(t)}</td>
+  <td class="mut nowrap">${ago(t.updated_at)}</td>
+</tr>`) : html`<tr><td colspan="5" class="mut">تیکتی نیست.</td></tr>`}
+</tbody>
+</table>
+</div>`);
+}
+
+// Script for the quick-registration page; kept free of template literals so it can live in a TS string.
+const ENROLL_JS = `
+let queue = [], cur = null;
+const $ = id => document.getElementById(id), pop = $('pop');
+const fa = s => String(s).replace(/\\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[d]);
+function beep() {
+  try { const c = new (window.AudioContext || window.webkitAudioContext)(), o = c.createOscillator(), g = c.createGain();
+        o.frequency.value = 880; g.gain.value = .15; o.connect(g).connect(c.destination); o.start(); o.stop(c.currentTime + .12); } catch (_) {}
+}
+function next() {
+  if (cur || !queue.length) return;
+  cur = queue.shift();
+  $('popInfo').textContent = 'شناسه ' + cur.uid + ' · ' + cur.door + ' · ساعت ' + fa(cur.time) +
+    (cur.card_id ? ' — این کارت قبلاً با نام «' + cur.name + '» ثبت شده؛ نام جدید جایگزین می‌شود.' : '');
+  $('popName').value = cur.name || '';
+  $('popErr').style.display = 'none';
+  $('popQueue').textContent = queue.length ? fa(queue.length) + ' کارت دیگر در صف' : '';
+  if (!pop.open) pop.showModal();
+  $('popName').focus(); $('popName').select();
+  beep();
+}
+function close() { cur = null; pop.close(); next(); }
+$('popSkip').onclick = close;
+pop.addEventListener('cancel', e => { e.preventDefault(); close(); });
+$('popForm').onsubmit = async e => {
+  e.preventDefault();
+  const body = new URLSearchParams({csrf: CSRF, uid: cur.uid, name: $('popName').value, class: $('cls').value});
+  try {
+    const r = await (await fetch('/enroll/save', {method: 'POST', body})).json();
+    if (!r.ok) { $('popErr').textContent = r.error; $('popErr').style.display = ''; return; }
+    const tb = $('done'); tb.querySelector('.empty')?.remove();
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td></td><td><a></a></td><td class="mono"></td><td class="mut"></td>';
+    tr.cells[0].textContent = fa(cur.time); tr.querySelector('a').textContent = r.name;
+    tr.querySelector('a').href = '/cards/' + r.card_id; tr.cells[2].textContent = cur.uid;
+    tr.cells[3].textContent = r.renamed ? 'نام تغییر کرد' : 'کارت جدید';
+    tb.prepend(tr);
+    close();
+  } catch (_) { $('popErr').textContent = 'ارتباط با سرور برقرار نشد؛ دوباره ذخیره کنید.'; $('popErr').style.display = ''; }
+};
+async function poll() {
+  try {
+    const r = await fetch('/enroll/feed?after=' + lastId, {cache: 'no-store'});
+    if (r.status === 401 || r.redirected) { location.reload(); return; }
+    const j = await r.json();
+    for (const e of j.events) {
+      lastId = Math.max(lastId, e.id);
+      if (cur && cur.uid === e.uid) continue;
+      if (queue.some(q => q.uid === e.uid)) continue;
+      queue.push(e);
+    }
+    $('status').textContent = 'در انتظار کارت…';
+    next();
+  } catch (_) { $('status').textContent = '⚠ ارتباط با سرور قطع است'; }
+  setTimeout(poll, 1500);
+}
+poll();
+`;
+
+export function enrollPage(c: PageCtx, v: { doors: Row[]; classes: Row[]; lastId: number; onlineAfter: number }) {
+  const js = (x: unknown) => JSON.stringify(x).replace(/</g, "\\u003c");
+  return layout(c, "ثبت سریع کارت · کنترل تردد", html`
+<h1>ثبت سریع کارت</h1>
+<p class="mut">یک دستگاه را در «حالت ثبت کارت» بگذارید و این صفحه را باز نگه دارید. هر کارتی که روی آن دستگاه بگذارید همین‌جا نمایش داده می‌شود؛ نام را بنویسید و Enter بزنید تا ذخیره شود و کارت بعدی را بگذارید. در حالت ثبت کارت، دستگاه در را باز نمی‌کند.</p>
+<div class="grid">
+  <div class="box">
+    <h2>دستگاه کارت‌خوان</h2>
+    ${v.doors.length ? v.doors.map((d) => html`
+    <div class="row" style="padding:4px 0">
+      <div>${dot(d.last_seen && d.last_seen >= v.onlineAfter)}${d.name} ${d.enroll ? html`<span class="pill warn">حالت ثبت کارت</span>` : ""}</div>
+      <form class="inline auto" method="post" action="/doors/${d.id}/enroll">${csrf(c)}
+        <button class="btn ${d.enroll ? "red" : ""} sm">${d.enroll ? "پایان ثبت کارت" : "شروع ثبت کارت"}</button></form>
+    </div>`) : html`<p class="mut">ابتدا در صفحهٔ <a href="/doors">دستگاه‌ها</a> یک دستگاه بسازید.</p>`}
+  </div>
+  <div class="box">
+    <h2>تنظیم</h2>
+    <label>کارت‌های جدید به این کلاس هم اضافه شوند (اختیاری)</label>
+    <select id="cls"><option value="">— هیچ —</option>${v.classes.map((k) => html`<option value="${k.id}">${k.name}</option>`)}</select>
+    <p class="mut" id="status">در انتظار کارت…</p>
+  </div>
+</div>
+<div class="box">
+  <h2>ثبت‌شده در این صفحه</h2>
+  <table><thead><tr><th>زمان</th><th>نام</th><th>شناسه کارت</th><th></th></tr></thead><tbody id="done">
+    <tr class="empty"><td colspan="4" class="mut">هنوز کارتی ثبت نشده است.</td></tr></tbody></table>
+</div>
+<dialog id="pop" style="border:0;border-radius:14px;padding:22px;max-width:420px;width:92vw">
+  <form id="popForm">
+    <h2 style="margin-top:0">کارت اسکن شد</h2>
+    <p class="mut" id="popInfo"></p>
+    <label for="popName">این کارت به چه نامی ثبت شود؟</label>
+    <input id="popName" maxlength="32" autocomplete="off" required>
+    <p class="flash error" id="popErr" style="display:none"></p>
+    <p class="row"><button class="btn auto">ذخیره</button> <button type="button" class="btn sec auto" id="popSkip">رد کردن</button>
+      <span class="mut auto" id="popQueue"></span></p>
+  </form>
+</dialog>
+<script>const CSRF = ${raw(js(c.csrf))}; let lastId = ${raw(String(v.lastId))};${raw(ENROLL_JS)}</script>`);
 }
 
 export function errorPage(status: number, message: string) {

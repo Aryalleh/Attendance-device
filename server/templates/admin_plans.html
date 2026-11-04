@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, limits_inputs, period_select %}
+{% block title %}پلن‌ها · مدیریت سرور{% endblock %}
+{% block body %}
+<h1>پلن‌ها</h1>
+<p class="mut">پلن‌های «نمایش به سازمان‌ها» در صفحهٔ اشتراک هر سازمان دیده می‌شوند و سازمان با یک کلیک برای آن تیکت درخواست می‌فرستد. اعمال پلن روی هر سازمان (و هر تغییر سفارشی) از صفحهٔ همان سازمان یا تیکت انجام می‌شود. حذف یا تغییر پلن، روی سازمان‌هایی که قبلاً آن را گرفته‌اند اثری ندارد.</p>
+<div class="grid">
+{% for p in plans %}
+  <div class="box">
+    <h2>{{ p.name }} {% if not p.public %}<span class="pill mut">مخفی</span>{% endif %}</h2>
+    <p class="mut">{{ p.n_orgs|fa }} سازمان روی این پلن</p>
+    <form method="post">{{ csrf() }}<input type="hidden" name="id" value="{{ p.id }}">
+      <label>نام</label><input name="name" value="{{ p.name }}" maxlength="60" required>
+      <div class="row">
+        <div><label>دوره</label>{{ period_select('period', p.period) }}</div>
+        <div><label>قیمت هر دوره ({{ CURRENCY }})</label><input name="price" type="number" dir="ltr" min="0" value="{{ p.price }}"></div>
+      </div>
+      {{ limits_inputs(p) }}
+      <label>توضیحات</label><input name="note" value="{{ p.note }}" maxlength="300">
+      <label class="check"><input type="checkbox" name="public" value="1" {{ 'checked' if p.public }}> نمایش به سازمان‌ها</label>
+      <p class="row"><button class="btn auto" name="action" value="save">ذخیره</button>
+        <button class="btn red sm auto" name="action" value="delete" onclick="return confirm('پلن حذف شود؟')">حذف</button></p>
+    </form>
+  </div>
+{% endfor %}
+  <div class="box">
+    <h2>پلن جدید</h2>
+    <form method="post">{{ csrf() }}<input type="hidden" name="action" value="save">
+      <label>نام</label><input name="name" maxlength="60" placeholder="پایه" required>
+      <div class="row">
+        <div><label>دوره</label>{{ period_select('period', 'month') }}</div>
+        <div><label>قیمت هر دوره ({{ CURRENCY }})</label><input name="price" type="number" dir="ltr" min="0" value="0"></div>
+      </div>
+      {{ limits_inputs({}) }}
+      <label>توضیحات</label><input name="note" maxlength="300">
+      <label class="check"><input type="checkbox" name="public" value="1" checked> نمایش به سازمان‌ها</label>
+      <p><button class="btn">افزودن پلن</button></p>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -278,7 +278,7 @@ class KioskActivity : Activity(), NfcAdapter.ReaderCallback, Door.Listener {
         if (r.online && pageLoaded) {
             // the server logged it; the live page shows it with its own sound on the next poll — make that now
             web.evaluateJavascript("window.pollNow && window.pollNow()", null)
-            if (r.result != "granted") vibrate(250)
+            if (r.result != "granted" && r.result != "enroll") vibrate(250)   // enroll = card-registration mode
             return
         }
         showResult(r)

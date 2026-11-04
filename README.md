@@ -203,6 +203,36 @@ Each company has its own panel users, cards, devices, logs and classes, and neve
 Upgrading from the single-company version is automatic: on first start the existing cards, doors and logs move into a
 company called «سازمان پیش‌فرض», and the existing logins become server owners. Rename it on the admin page.
 
+### Quick card registration
+
+**ثبت سریع کارت** (also linked from the Cards page): put one device in **card-registration mode** and keep the page
+open. Every card placed on that device pops up on the page with "این کارت به چه نامی ثبت شود؟"; type the name, press
+Enter, and put the next card on. Cards scanned quickly one after another wait in a queue. A card that is already
+registered shows its current name and can be renamed. New cards can be added to a class in the same step.
+While a device is in registration mode it opens nothing, and the Wemos plays its "enrolled" beep (firmware 1.0.2).
+Turn the mode off on the same page or on Devices.
+
+### Plans, subscriptions and support tickets
+
+The server owner sells plans on **پلن‌ها** (`/admin/plans`): a name, a billing period (**daily, weekly, monthly or
+yearly**), a price per period and limits on **panel users, devices, cards and classes** (empty = unlimited). Plans
+marked as public appear on each company's **اشتراک** page.
+
+- A company clicks **درخواست این پلن**, or fills in a **custom plan** (how many users, devices, cards and classes, and
+  the period). Either one opens a **ticket** for the owner. Companies can also open plain tickets.
+- The owner sees new tickets under **تیکت‌ها** (with a counter). The ticket page has the subscription form already
+  filled in from the request; the owner changes whatever is needed (price, limits, period, end date) and applies it,
+  which also answers and closes the ticket. Any company's subscription can be edited on its page (`/admin/orgs/<id>`).
+- **Payments** are recorded by hand on the company's page: the number of periods paid extends the subscription
+  (1, 7, 30 or 365 days per period) from its current end date, or from today if it has already ended.
+- **Limits** are enforced when a company adds users, devices, cards (including quick registration) or classes;
+  the server owner, working inside a company's panel, is not limited. Lowering a limit never deletes anything.
+- When the subscription end date has passed, the company's panel shows a red notice. Nothing is switched off
+  automatically: devices keep working until the owner disables the company.
+
+Prices are shown in تومان; set `ACCESSCTL_CURRENCY` (Flask) or the `CURRENCY` variable (Cloudflare) to change the label.
+Companies that existed before this version have no plan and no limits until the owner sets them.
+
 ### Classes (attendance per class)
 
 On the **کلاس‌ها** page a company creates classes, picks the **members** (from its cards) and links the class to a
@@ -243,12 +273,14 @@ the system font (Tahoma/Segoe UI).
   Anyone with the link can see that device's scans, and **New key** revokes it.
 - **Dashboard** (`/dashboard`): who is inside, today's counts, device online/offline status, unregistered cards, recent activity.
 - **Cards**: add, edit, block or allow; optional **valid-until** date and a note; per-card history.
-- **Devices**: direction (entry, exit or toggle), enable/disable, new key, live-screen link.
+- **Devices**: direction (entry, exit or toggle), enable/disable, card-registration mode, new key, live-screen link.
+- **Quick card registration**: name cards as they are scanned on a reader.
 - **Classes**: members, weekly or one-off schedules on a device, per-session and per-member attendance reports.
 - **Log**: filter by name, UID, result, device, class and date; CSV export.
 - **Daily attendance**: first in, last out and time on site per person per day.
+- **Subscription** (اشتراک): current plan, usage against limits, payments, available plans, plan requests and tickets.
 - **Settings**: the company's panel users, purging the company's old events.
-- **Server admin** (owners only): companies, their users, integrations.
+- **Server admin** (owners only): companies, their users and subscriptions, plans, tickets, integrations.
 
 ### Hooking it into other things on the server
 
@@ -270,8 +302,9 @@ All requests carry the header `X-Device-Key: <key>`.
 | `GET /api/v1/cards` | — | TSV lines `uid⇥1⇥inside⇥name` (valid cards only) |
 | `GET /api/v1/kiosk` | — | `{"name":"Front door","url":"/kiosk/<token>"}` — this door's live-screen link (used by the Android app) |
 
-`result` is one of `granted | unknown | disabled | expired | denied | not_member` (denied = device or company disabled;
-not_member = scanned during a class session by someone who isn't a member).
+`result` is one of `granted | unknown | disabled | expired | denied | not_member | enroll` (denied = device or company disabled;
+not_member = scanned during a class session by someone who isn't a member; enroll = the device is in
+card-registration mode, nothing opens).
 
 ---
 

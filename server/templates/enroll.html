@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}ثبت سریع کارت · کنترل تردد{% endblock %}
+{% block body %}
+<h1>ثبت سریع کارت</h1>
+<p class="mut">یک دستگاه را در «حالت ثبت کارت» بگذارید و این صفحه را باز نگه دارید. هر کارتی که روی آن دستگاه بگذارید همین‌جا نمایش داده می‌شود؛ نام را بنویسید و Enter بزنید تا ذخیره شود و کارت بعدی را بگذارید. در حالت ثبت کارت، دستگاه در را باز نمی‌کند.</p>
+
+<div class="grid">
+  <div class="box">
+    <h2>دستگاه کارت‌خوان</h2>
+    {% for d in doors %}
+    <div class="row" style="padding:4px 0">
+      <div><span class="dot {{ 'on' if d.last_seen and d.last_seen >= online_after else 'off' }}"></span>{{ d.name }}
+        {% if d.enroll %}<span class="pill warn">حالت ثبت کارت</span>{% endif %}</div>
+      <form class="inline auto" method="post" action="{{ url_for('door_enroll', door_id=d.id) }}">{{ csrf() }}
+        <button class="btn {{ 'red' if d.enroll else '' }} sm">{{ 'پایان ثبت کارت' if d.enroll else 'شروع ثبت کارت' }}</button></form>
+    </div>
+    {% else %}
+    <p class="mut">ابتدا در صفحهٔ <a href="{{ url_for('doors') }}">دستگاه‌ها</a> یک دستگاه بسازید.</p>
+    {% endfor %}
+  </div>
+  <div class="box">
+    <h2>تنظیم</h2>
+    <label>کارت‌های جدید به این کلاس هم اضافه شوند (اختیاری)</label>
+    <select id="cls"><option value="">— هیچ —</option>{% for k in classes %}<option value="{{ k.id }}">{{ k.name }}</option>{% endfor %}</select>
+    <p class="mut" id="status">در انتظار کارت…</p>
+  </div>
+</div>
+
+<div class="box">
+  <h2>ثبت‌شده در این صفحه</h2>
+  <table><thead><tr><th>زمان</th><th>نام</th><th>شناسه کارت</th><th></th></tr></thead><tbody id="done">
+    <tr class="empty"><td colspan="4" class="mut">هنوز کارتی ثبت نشده است.</td></tr></tbody></table>
+</div>
+
+<dialog id="pop" style="border:0;border-radius:14px;padding:22px;max-width:420px;width:92vw">
+  <form id="popForm">
+    <h2 style="margin-top:0">کارت اسکن شد</h2>
+    <p class="mut" id="popInfo"></p>
+    <label for="popName">این کارت به چه نامی ثبت شود؟</label>
+    <input id="popName" maxlength="32" autocomplete="off" required>
+    <p class="flash error" id="popErr" style="display:none"></p>
+    <p class="row"><button class="btn auto">ذخیره</button> <button type="button" class="btn sec auto" id="popSkip">رد کردن</button>
+      <span class="mut auto" id="popQueue"></span></p>
+  </form>
+</dialog>
+
+<script>
+const CSRF = {{ csrf_token()|tojson }}, FEED = {{ url_for('enroll_feed')|tojson }}, SAVE = {{ url_for('enroll_save')|tojson }};
+let lastId = {{ last_id }}, queue = [], cur = null;
+const $ = id => document.getElementById(id), pop = $('pop');
+const fa = s => String(s).replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[d]);
+
+function beep() {
+  try { const c = new (window.AudioContext || window.webkitAudioContext)(), o = c.createOscillator(), g = c.createGain();
+        o.frequency.value = 880; g.gain.value = .15; o.connect(g).connect(c.destination); o.start(); o.stop(c.currentTime + .12); } catch (_) {}
+}
+function next() {
+  if (cur || !queue.length) return;
+  cur = queue.shift();
+  $('popInfo').textContent = `شناسه ${cur.uid} · ${cur.door} · ساعت ${fa(cur.time)}` +
+    (cur.card_id ? ` — این کارت قبلاً با نام «${cur.name}» ثبت شده؛ نام جدید جایگزین می‌شود.` : '');
+  $('popName').value = cur.name || '';
+  $('popErr').style.display = 'none';
+  $('popQueue').textContent = queue.length ? `${fa(queue.length)} کارت دیگر در صف` : '';
+  if (!pop.open) pop.showModal();
+  $('popName').focus(); $('popName').select();
+  beep();
+}
+function close() { cur = null; pop.close(); next(); }
+$('popSkip').onclick = close;
+pop.addEventListener('cancel', e => { e.preventDefault(); close(); });
+$('popForm').onsubmit = async e => {
+  e.preventDefault();
+  const body = new URLSearchParams({csrf: CSRF, uid: cur.uid, name: $('popName').value, class: $('cls').value});
+  try {
+    const r = await (await fetch(SAVE, {method: 'POST', body})).json();
+    if (!r.ok) { $('popErr').textContent = r.error; $('popErr').style.display = ''; return; }
+    const tb = $('done'); tb.querySelector('.empty')?.remove();
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td></td><td><a></a></td><td class="mono"></td><td class="mut"></td>';
+    tr.cells[0].textContent = fa(cur.time); tr.querySelector('a').textContent = r.name;
+    tr.querySelector('a').href = '/cards/' + r.card_id; tr.cells[2].textContent = cur.uid;
+    tr.cells[3].textContent = r.renamed ? 'نام تغییر کرد' : 'کارت جدید';
+    tb.prepend(tr);
+    close();
+  } catch (_) { $('popErr').textContent = 'ارتباط با سرور برقرار نشد؛ دوباره ذخیره کنید.'; $('popErr').style.display = ''; }
+};
+async function poll() {
+  try {
+    const r = await fetch(FEED + '?after=' + lastId, {cache: 'no-store'});
+    if (r.status === 401 || r.redirected) { location.reload(); return; }
+    const j = await r.json();
+    for (const e of j.events) {
+      lastId = Math.max(lastId, e.id);
+      if (cur && cur.uid === e.uid) continue;                       // same card held on the reader
+      if (queue.some(q => q.uid === e.uid)) continue;
+      queue.push(e);
+    }
+    $('status').textContent = 'در انتظار کارت…';
+    next();
+  } catch (_) { $('status').textContent = '⚠ ارتباط با سرور قطع است'; }
+  setTimeout(poll, 1000);
+}
+poll();
+</script>
+{% endblock %}

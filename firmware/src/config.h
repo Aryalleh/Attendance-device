@@ -21,7 +21,7 @@
 #define BUZZER_ACTIVE_LOW  false   // many 3-pin "low level trigger" buzzer modules need true
 #define RELAY_ACTIVE_LOW   true    // most blue relay boards are active-LOW
 
-#define FW_VERSION         "1.0.1"
+#define FW_VERSION         "1.0.2"
 
 #define MAX_CARDS          200
 #define LOG_MAX_BYTES      60000   // local log is rotated to /log.old when it grows past this

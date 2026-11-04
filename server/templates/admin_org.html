@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, subscription_form %}
+{% block title %}{{ org.name }} · مدیریت سرور{% endblock %}
+{% block body %}
+<div class="row" style="margin-bottom:12px">
+  <h1>{{ org.name }}</h1>
+  {% if not org.enabled %}<span class="pill bad auto">غیرفعال</span>{% endif %}
+  <form class="inline auto" method="post" action="{{ url_for('admin_view') }}">{{ csrf() }}<input type="hidden" name="org" value="{{ org.id }}"><button class="btn sm">ورود به پنل</button></form>
+  <a class="btn sec auto" href="{{ url_for('admin') }}">همه سازمان‌ها</a>
+</div>
+
+<div class="grid">
+  <div class="box">
+    <h2>استفاده</h2>
+    <table>
+      <thead><tr><th></th><th>استفاده شده</th><th>سقف</th></tr></thead>
+      {% for k in ['users','devices','cards','classes'] %}
+      <tr><td>{{ LIMIT_FA[k] }}</td><td>{{ usage[k]|fa }}</td>
+        <td>{{ org['max_' ~ k]|limit }}{% if org['max_' ~ k] is not none and usage[k] > org['max_' ~ k] %} <span class="pill warn">بیش از سقف</span>{% endif %}</td></tr>
+      {% endfor %}
+    </table>
+    <p>اعتبار تا: {% if org.paid_until %}<b>{{ org.paid_until|jinput|fa }}</b>{% if org.paid_until < today_iso() %} <span class="pill bad">منقضی</span>{% endif %}{% else %}<span class="mut">—</span>{% endif %}</p>
+  </div>
+
+  <div class="box">
+    <h2>ثبت پرداخت</h2>
+    <p class="mut">اشتراک به اندازهٔ تعداد دوره تمدید می‌شود (روزانه ۱، هفتگی ۷، ماهانه ۳۰ و سالانه ۳۶۵ روز)؛ از تاریخ پایان فعلی، یا از امروز اگر منقضی شده باشد.</p>
+    <form method="post">{{ csrf() }}<input type="hidden" name="action" value="payment">
+      <div class="row">
+        <div><label>تعداد دوره ({{ PERIOD_FA.get(org.period or 'month') }})</label><input name="count" type="number" dir="ltr" min="1" value="1"></div>
+        <div><label>مبلغ ({{ CURRENCY }}، خالی = قیمت × تعداد)</label><input name="amount" type="number" dir="ltr" min="0"></div>
+      </div>
+      <label>یادداشت (شماره پیگیری، روش پرداخت…)</label><input name="note" maxlength="200">
+      <p><button class="btn">ثبت پرداخت و تمدید</button></p>
+    </form>
+    {% for p in payments %}
+    <div class="row" style="padding:2px 0"><span class="mut">{{ p.created_at|jdate }} · {{ p.amount|money }} {{ CURRENCY }} · تا {{ p.paid_until|jinput|fa }}{% if p.note %} · {{ p.note }}{% endif %}</span>
+      <form class="inline auto" method="post" onsubmit="return confirm('این پرداخت از سوابق حذف شود؟')">{{ csrf() }}<input type="hidden" name="action" value="del_payment"><input type="hidden" name="id" value="{{ p.id }}"><button class="btn red sm">حذف</button></form></div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="box">
+  <h2>اشتراک</h2>
+  <p class="mut">پلن را انتخاب کنید تا مقادیر پر شود، یا «سفارشی» بگذارید و هر عدد را خودتان تعیین کنید.</p>
+  {{ subscription_form(org, proposal, plans) }}
+</div>
+
+<div class="box">
+  <h2>تیکت‌ها</h2>
+  {% for t in tickets %}
+  <div><a href="{{ url_for('admin_ticket', ticket_id=t.id) }}">{{ t.subject }}</a> <span class="mut">· {{ t.updated_at|ago }}</span>
+    {% if t.owner_unread %}<span class="pill bad">جدید</span>{% endif %}{% if t.status == 'closed' %}<span class="pill mut">بسته</span>{% endif %}</div>
+  {% else %}<p class="mut">تیکتی ندارد.</p>{% endfor %}
+</div>
+{% endblock %}

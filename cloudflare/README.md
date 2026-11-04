@@ -35,7 +35,7 @@ Open that URL and log in as `admin` (the server owner). On **مدیریت سرو
 login; that company then adds its own devices, cards and classes in its panel. Enter the server address and the
 device key in each device. Companies, classes and the upgrade of an existing database work exactly as on the Flask
 server (see the main README): `npm run db:migrate` applies `migrations/0002_multitenant.sql`, which moves existing
-data into «سازمان پیش‌فرض».
+data into «سازمان پیش‌فرض», and `0003_plans_enroll.sql` adds plans, subscriptions, tickets and card-registration mode.
 
 Optional:
 

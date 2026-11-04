@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}تیکت‌ها · مدیریت سرور{% endblock %}
+{% block body %}
+<div class="row" style="margin-bottom:12px">
+  <h1>تیکت‌ها</h1>
+  {% for s, l in [('open','باز'),('closed','بسته'),('all','همه')] %}
+  <a class="btn {{ '' if status == s else 'sec' }} sm auto" href="{{ url_for('admin_tickets', status=s) }}">{{ l }}</a>
+  {% endfor %}
+</div>
+<div class="box scroll">
+<table>
+<thead><tr><th>سازمان</th><th>موضوع</th><th>نوع</th><th>وضعیت</th><th>آخرین تغییر</th></tr></thead>
+<tbody>
+{% for t in tickets %}
+<tr>
+  <td><a href="{{ url_for('admin_org', org_id=t.org_id) }}">{{ t.org_name }}</a></td>
+  <td><a href="{{ url_for('admin_ticket', ticket_id=t.id) }}"><b>{{ t.subject }}</b></a>{% if t.owner_unread %} <span class="pill bad">جدید</span>{% endif %}</td>
+  <td>{{ {'plan':'درخواست پلن','custom':'پلن سفارشی','other':'پیام'}[t.kind] }}</td>
+  <td>{% if t.status == 'open' %}<span class="pill ok">باز</span>{% else %}<span class="pill mut">بسته</span>{% endif %}</td>
+  <td class="mut nowrap">{{ t.updated_at|ago }}</td>
+</tr>
+{% else %}
+<tr><td colspan="5" class="mut">تیکتی نیست.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endblock %}

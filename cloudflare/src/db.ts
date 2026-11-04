@@ -135,6 +135,7 @@ export type Decision = { result: string; direction: string; classId: number | nu
 export async function decide(db: D1Database, dev: Row, orgEnabled: boolean, card: Row | null, ts: number): Promise<Decision> {
   const out: Decision = { result: "denied", direction: "", classId: null, slotId: null, sessionDate: null };
   if (!orgEnabled || !dev.enabled) return out;
+  if (dev.enroll) return { ...out, result: "enroll" };   // card-registration mode: just report the card to the panel
   if (!card) return { ...out, result: "unknown" };
   const valid = cardValid(card);
   if (valid !== "ok") return { ...out, result: valid };
@@ -260,3 +261,31 @@ export async function classSummary(db: D1Database, cls: Row, sessions: ClassSess
 }
 
 export const EVENT_SELECT = "SELECT e.*, d.name AS door, k.name AS class_name FROM events e LEFT JOIN devices d ON d.id = e.device_id LEFT JOIN classes k ON k.id = e.class_id ";
+
+// --- plans and limits --------------------------------------------------------------
+
+export const PERIODS: Record<string, number> = { day: 1, week: 7, month: 30, year: 365 };   // days one paid period covers
+export const LIMITS = ["users", "devices", "cards", "classes"] as const;
+export type Limit = (typeof LIMITS)[number];
+
+export async function usage(db: D1Database, orgId: number): Promise<Record<Limit, number>> {
+  const r = await first(db,
+    `SELECT (SELECT COUNT(*) FROM users WHERE org_id = ?1) AS users, (SELECT COUNT(*) FROM devices WHERE org_id = ?1) AS devices,
+            (SELECT COUNT(*) FROM cards WHERE org_id = ?1) AS cards, (SELECT COUNT(*) FROM classes WHERE org_id = ?1) AS classes`, orgId);
+  return { users: r?.users || 0, devices: r?.devices || 0, cards: r?.cards || 0, classes: r?.classes || 0 };
+}
+
+/** The company's limit for `what` if it is already used up (so nothing more may be added), else null. */
+export async function overLimit(db: D1Database, org: Row, what: Limit): Promise<number | null> {
+  const cap = org["max_" + what];
+  if (cap === null || cap === undefined) return null;
+  const r = await first(db, `SELECT COUNT(*) AS n FROM ${what} WHERE org_id = ?`, org.id);
+  return (r?.n || 0) >= cap ? cap : null;
+}
+
+/** New subscription end date (ISO) after paying `count` periods, counted from today if already expired. */
+export function extendUntil(paidUntil: string | null, period: string, count: number): string {
+  const t = today();
+  const start = paidUntil && paidUntil > t ? paidUntil : t;
+  return J.addDays(start, (PERIODS[period] || 30) * count);
+}
