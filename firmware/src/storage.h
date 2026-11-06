@@ -191,11 +191,13 @@ class EventLog {
 // Line format: epoch \t uid \t result \t direction
 class OfflineQueue {
  public:
-  void push(uint32_t ts, const String& uid, const char* result, const String& dir) {
+  // live = decided on the device while the server was reachable (shown on the live screen);
+  // otherwise the server marks it as decided offline. Line: ts uid result dir [live]
+  void push(uint32_t ts, const String& uid, const char* result, const String& dir, bool live = false) {
     File f = LittleFS.open("/queue.tsv", "a");
     if (!f) return;
     if (f.size() < QUEUE_MAX_BYTES)
-      f.printf("%u\t%s\t%s\t%s\n", ts, uid.c_str(), result, dir.c_str());
+      f.printf("%u\t%s\t%s\t%s\t%d\n", ts, uid.c_str(), result, dir.c_str(), live ? 1 : 0);
     f.close();
   }
   bool empty() {

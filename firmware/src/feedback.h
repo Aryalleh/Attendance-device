@@ -32,6 +32,7 @@ class Feedback {
 
   void openDoor(uint32_t ms) { _relayUntil = millis() + ms; _relayOn = true; setRelay(true); }
   bool doorOpen() const { return _relayOn; }
+  bool busy() const { return _pat != nullptr; }   // a beep/LED pattern is still playing
 
   void setIdle(Idle i) { _idle = i; }
 

@@ -41,7 +41,10 @@ bool readerOk = false;
 String cacheVersion;
 String network;
 uint32_t lastSyncMs = 0, lastReaderCheckMs = 0, lastPollMs = 0;
-uint32_t lastNetOkMs = 0;   // last successful reply from the server (Wi-Fi link watchdog)
+uint32_t lastNetOkMs = 0;
+String serverDir = "toggle";     // door direction from the server (in | out | toggle)
+uint32_t serverOpenMs = 3000;    // door open time from the server
+bool syncSoon = false;           // a scan is waiting to be reported   // last successful reply from the server (Wi-Fi link watchdog)
 uint32_t rebootAtMs = 0, cardsDirtySinceMs = 0;
 
 String lastUid, lastName, lastResult;
@@ -99,6 +102,8 @@ void switchServer(bool backup, const char* why) {
 
 // called after every request: no reply at all means "unreachable"
 void noteServerResult(int code) {
+  if (code <= 0) Serial.printf("[sync] %s: no reply (%d %s), heap %u\n", activeUrl().c_str(), code,
+                               HTTPClient::errorToString(code).c_str(), ESP.getFreeHeap());
   if (code > 0 || !hasBackup()) return;
   switchServer(!useBackup, useBackup ? "failover server unreachable" : "primary server unreachable");
 }
@@ -123,8 +128,16 @@ int postJson(const char* path, JsonDocument& req, JsonDocument& resp) {
   http.addHeader("X-Device-Key", activeKey());
   String body;
   serializeJson(req, body);
+  uint32_t heapBefore = ESP.getFreeHeap(), blockBefore = ESP.getMaxFreeBlockSize(), t0 = millis();
   int code = http.POST(body);
   if (code > 0) lastNetOkMs = millis();   // any HTTP reply proves the link works
+  if (code <= 0 && serverIsHttps()) {
+    // why did the HTTPS connection fail? memory (TLS needs one ~17 KB block), timeout, or a TLS error
+    char err[64] = "";
+    int e = static_cast<BearSSL::WiFiClientSecure*>(client.get())->getLastSSLError(err, sizeof(err));
+    Serial.printf("[tls] failed after %lu ms: ssl error %d %s; before: heap %u, largest block %u\n",
+                  (unsigned long)(millis() - t0), e, err, heapBefore, blockBefore);
+  }
   noteServerResult(code);
   if (code == 200) {
     String r = http.getString();
@@ -176,13 +189,15 @@ void syncServer() {
       String line = f.readStringUntil('\n');
       line.trim();
       if (line.isEmpty()) continue;
-      String p[4];
-      if (splitTabs(line, p, 4) < 4) continue;
+      String p[5];
+      int n = splitTabs(line, p, 5);
+      if (n < 4) continue;
       JsonObject o = ev.add<JsonObject>();
       o["ts"] = (uint32_t)p[0].toInt();
       o["uid"] = p[1];
       o["result"] = p[2];
       o["direction"] = p[3];
+      o["offline"] = !(n == 5 && p[4] == "1");
       hadQueue = true;
     }
     f.close();
@@ -196,6 +211,8 @@ void syncServer() {
 
   uint32_t t = resp["time"] | 0;
   if (t && (!timeValid() || abs((int32_t)(t - nowTs())) > 2)) setEpoch(t);
+  serverDir = resp["direction"] | "toggle";
+  serverOpenMs = resp["open_ms"] | 3000;
 
   if (resp["open"] | false) {
     fb.openDoor(resp["open_ms"] | 3000);
@@ -217,15 +234,27 @@ const char* decideLocal(CardStore& store, const String& uid, String& name, Strin
   if (!c) { fb.play(Patterns::UNKNOWN); return "unknown"; }
   name = c->name;
   if (!c->enabled) { fb.play(Patterns::DENIED); return "denied"; }
-  dir = S.isServerMode() ? String("toggle") : S.direction;
-  if (dir == "toggle") dir = c->inside ? "out" : "in";
+  dir = S.isServerMode() ? serverDir : S.direction;
+  if (dir != "in" && dir != "out") dir = c->inside ? "out" : "in";
   c->inside = dir == "in";
   markCardsDirty();
-  grant(S.openMs);
+  grant(S.isServerMode() ? serverOpenMs : S.openMs);
   return "granted";
 }
 
+// Server mode, fast path: once the device holds the server's card list (refreshed
+// on every sync), it decides on the spot -- no network round trip before the
+// beep -- and reports the event in a sync right after the beep.
 void handleServerScan(const String& uid) {
+  if (cacheVersion.length() && (serverOk || S.offlineFallback)) {
+    String name, dir;
+    const char* result = decideLocal(cacheCards, uid, name, dir);
+    offlineQ.push(nowTs(), uid, result, dir, serverOk);
+    setLast(uid, name, result);
+    syncSoon = true;
+    return;
+  }
+  // no card list yet: ask the server directly
   if (WiFi.status() == WL_CONNECTED && S.serverUrl.length()) {
     JsonDocument req, resp;
     req["uid"] = uid;
@@ -708,6 +737,79 @@ void closeSetupAp() {
   Serial.println("[wifi] setup AP closed");
 }
 
+// USB serial configuration (115200 baud), for setting up a device that has no
+// network yet. Needs physical access to the USB port.
+//   show                  print the settings (secrets hidden)
+//   set <key> <value>     e.g. "set serverUrl2 https://x.trycloudflare.com"; saved immediately
+//   reboot                restart to apply
+void handleSerial() {
+  static String line;
+  while (Serial.available()) {
+    char ch = Serial.read();
+    if (ch == '\r') continue;
+    if (ch != '\n') {
+      if (line.length() < 300) line += ch;
+      continue;
+    }
+    line.trim();
+    if (line == "show") {
+      JsonDocument d;
+      S.toJson(d.to<JsonObject>(), false);
+      serializeJsonPretty(d, Serial);
+      Serial.println();
+    } else if (line == "nettest") {
+      // where does traffic stop? gateway, DNS, internet by IP, internet by name
+      Serial.printf("[net] status %d, IP %s, gateway %s, DNS %s, signal %d dBm\n", WiFi.status(),
+                    WiFi.localIP().toString().c_str(), WiFi.gatewayIP().toString().c_str(),
+                    WiFi.dnsIP().toString().c_str(), WiFi.RSSI());
+      auto tcp = [](const IPAddress& ip, uint16_t port, const char* what) {
+        WiFiClient c;
+        c.setTimeout(3000);
+        uint32_t t = millis();
+        bool ok = c.connect(ip, port);
+        Serial.printf("[net] TCP %s %s:%u -> %s (%lu ms)\n", what, ip.toString().c_str(), port,
+                      ok ? "OK" : "FAILED", (unsigned long)(millis() - t));
+        c.stop();
+      };
+      tcp(WiFi.gatewayIP(), 53, "gateway");
+      tcp(IPAddress(1, 1, 1, 1), 80, "internet");
+      IPAddress srv;
+      bool dns = WiFi.hostByName("www.cloudflare.com", srv);
+      Serial.printf("[net] DNS www.cloudflare.com -> %s\n", dns ? srv.toString().c_str() : "FAILED");
+      // the configured servers: http(s)://host[:port]
+      for (const String* u : {&S.serverUrl, &S.serverUrl2}) {
+        if (u->isEmpty()) continue;
+        bool tls = u->startsWith("https://");
+        String hp = u->substring(u->indexOf("//") + 2);
+        if (hp.indexOf('/') >= 0) hp = hp.substring(0, hp.indexOf('/'));
+        int colon = hp.indexOf(':');
+        uint16_t port = colon >= 0 ? hp.substring(colon + 1).toInt() : (tls ? 443 : 80);
+        String host = colon >= 0 ? hp.substring(0, colon) : hp;
+        IPAddress ip;
+        if (WiFi.hostByName(host.c_str(), ip)) tcp(ip, port, host.c_str());
+        else Serial.printf("[net] DNS %s -> FAILED\n", host.c_str());
+      }
+    } else if (line == "reboot") {
+      Serial.println("[cfg] rebooting");
+      delay(100);
+      ESP.restart();
+    } else if (line.startsWith("set ")) {
+      int sp = line.indexOf(' ', 4);
+      String key = sp > 0 ? line.substring(4, sp) : line.substring(4);
+      String val = sp > 0 ? line.substring(sp + 1) : "";
+      JsonDocument d;
+      if (val == "true" || val == "false") d[key] = val == "true";
+      else if (val.length() && val.length() < 10 && strspn(val.c_str(), "0123456789") == val.length()) d[key] = (uint32_t)val.toInt();
+      else d[key] = val;
+      S.apply(d.as<JsonObjectConst>());
+      Serial.println(S.save() ? "[cfg] saved " + key + " (type 'reboot' to apply)" : String("[cfg] save failed"));
+    } else if (line.length()) {
+      Serial.println("[cfg] commands: show | set <key> <value> | nettest | reboot");
+    }
+    line = "";
+  }
+}
+
 // Keeps the router link alive: retries while disconnected (alternating
 // 802.11n/g), and in server mode rejoins when the link is "up" but the server
 // has stopped answering, which some routers cause without a disconnect event.
@@ -793,6 +895,7 @@ void loop() {
   fb.update();
 
   maintainWifi(ms);
+  handleSerial();
 
   if (ms - lastPollMs >= 50) {
     lastPollMs = ms;
@@ -809,7 +912,10 @@ void loop() {
     }
   }
 
-  if (S.isServerMode() && ms - lastSyncMs >= SYNC_INTERVAL_MS) {
+  // sync every few seconds, and right after a scan -- but never while a beep is
+  // playing, as the request blocks and would stretch the beep
+  if (S.isServerMode() && !fb.busy() && (syncSoon || ms - lastSyncMs >= SYNC_INTERVAL_MS)) {
+    syncSoon = false;
     lastSyncMs = ms;
     syncServer();
   }
