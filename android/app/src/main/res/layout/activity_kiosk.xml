@@ -2,7 +2,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#0E1116"
+    android:background="@color/kiosk_bg"
     android:keepScreenOn="true">
 
     <!-- The server's live screen for this door (/kiosk/<token>) -->
@@ -10,7 +10,7 @@
         android:id="@+id/web"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#0E1116"
+        android:background="@color/kiosk_bg"
         android:visibility="invisible" />
 
     <!-- Built-in screen, used while the server page can't be loaded -->
@@ -26,7 +26,7 @@
             android:id="@+id/doorName"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textColor="#8B93A3"
+            android:textColor="@color/kiosk_muted"
             android:textSize="20sp" />
 
         <TextClock
@@ -35,27 +35,38 @@
             android:layout_marginTop="8dp"
             android:format12Hour="HH:mm:ss"
             android:format24Hour="HH:mm:ss"
-            android:textColor="#EEF1F6"
-            android:textSize="56sp"
+            android:textColor="@color/kiosk_text"
+            android:textSize="48sp"
             android:textStyle="bold" />
+
+        <ImageView
+            android:layout_width="144dp"
+            android:layout_height="144dp"
+            android:layout_marginTop="32dp"
+            android:background="@drawable/bg_idle_ring"
+            android:contentDescription="@null"
+            android:padding="36dp"
+            android:src="@drawable/ic_result_card"
+            android:tint="@color/kiosk_brand_soft" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="40dp"
+            android:layout_marginTop="24dp"
             android:text="@string/ready"
             android:textAlignment="center"
-            android:textColor="#EEF1F6"
-            android:textSize="26sp" />
+            android:textColor="@color/kiosk_text"
+            android:textSize="26sp"
+            android:textStyle="bold" />
 
         <TextView
             android:id="@+id/nativeStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="12dp"
             android:text="@string/connecting"
             android:textAlignment="center"
-            android:textColor="#8B93A3"
+            android:textColor="@color/kiosk_muted"
             android:textSize="16sp" />
     </LinearLayout>
 
@@ -64,20 +75,19 @@
         android:id="@+id/overlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#0E1116"
+        android:background="@color/kiosk_bg"
         android:clickable="true"
         android:gravity="center"
         android:orientation="vertical"
         android:padding="24dp"
         android:visibility="gone">
 
-        <TextView
+        <ImageView
             android:id="@+id/ovIcon"
             android:layout_width="160dp"
             android:layout_height="160dp"
-            android:gravity="center"
-            android:textSize="96sp"
-            android:textStyle="bold" />
+            android:contentDescription="@null"
+            android:padding="40dp" />
 
         <TextView
             android:id="@+id/ovTitle"
@@ -85,15 +95,18 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
             android:textAlignment="center"
-            android:textSize="30sp" />
+            android:textSize="30sp"
+            android:textStyle="bold" />
 
         <TextView
             android:id="@+id/ovName"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
+            android:ellipsize="end"
+            android:maxLines="2"
             android:textAlignment="center"
-            android:textColor="#EEF1F6"
+            android:textColor="@color/kiosk_text"
             android:textSize="54sp"
             android:textStyle="bold" />
 
@@ -103,7 +116,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:textAlignment="center"
-            android:textColor="#8B93A3"
+            android:textColor="@color/kiosk_muted"
             android:textSize="20sp" />
     </LinearLayout>
 
@@ -114,9 +127,12 @@
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|center_horizontal"
         android:layout_marginBottom="100dp"
-        android:background="#2E1012"
-        android:padding="12dp"
-        android:textColor="#EEF1F6"
+        android:background="@drawable/bg_banner"
+        android:paddingLeft="20dp"
+        android:paddingRight="20dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:textColor="@color/kiosk_warn_text"
         android:textSize="15sp"
         android:visibility="gone" />
 

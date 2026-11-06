@@ -47,4 +47,6 @@
     <string name="exit_logged">خروج ثبت شد</string>
     <string name="remote_open">در از راه دور باز شد</string>
     <string name="try_again">اتصال شبکه را بررسی کنید و دوباره امتحان کنید</string>
+    <string name="card_not_checked">کارت بررسی نشد</string>
+    <string name="not_member">عضو این کلاس نیستید</string>
 </resources>

@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
@@ -28,6 +29,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 
@@ -300,14 +302,24 @@ class KioskActivity : Activity(), NfcAdapter.ReaderCallback, Door.Listener {
     private fun showResult(r: Door.ScanResult) {
         val ok = r.result == "granted"
         val info = r.result == "manual"
-        val color = when { ok -> OK; info -> INFO; else -> BAD }
-        val icon = findViewById<TextView>(R.id.ovIcon)
-        icon.text = when { ok -> "✓"; info -> "↦"; else -> "✕" }
-        icon.setTextColor(color)
+        val unreachable = !ok && !info && !r.online
+        val color = when { ok -> OK; info -> INFO; unreachable -> WARN; else -> BAD }
+        val icon = findViewById<ImageView>(R.id.ovIcon)
+        icon.setImageResource(when {
+            info -> R.drawable.ic_result_door
+            ok && r.direction == "out" -> R.drawable.ic_result_out
+            ok -> R.drawable.ic_result_ok
+            unreachable -> R.drawable.ic_result_wifi
+            r.result == "disabled" -> R.drawable.ic_result_blocked
+            r.result == "expired" -> R.drawable.ic_result_expired
+            r.result == "denied" -> R.drawable.ic_result_door
+            else -> R.drawable.ic_result_bad
+        })
+        icon.imageTintList = ColorStateList.valueOf(color)
         icon.background = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setStroke(dp(4), color)
-            setColor(Color.argb(24, Color.red(color), Color.green(color), Color.blue(color)))
+            setColor(Color.argb(38, Color.red(color), Color.green(color), Color.blue(color)))
         }
         val title = findViewById<TextView>(R.id.ovTitle)
         title.setTextColor(color)
@@ -316,10 +328,11 @@ class KioskActivity : Activity(), NfcAdapter.ReaderCallback, Door.Listener {
             ok && r.direction == "out" -> R.string.goodbye
             ok && r.direction == "in" -> R.string.welcome
             ok -> R.string.granted
-            !r.online -> R.string.server_unreachable
+            unreachable -> R.string.server_unreachable
             else -> R.string.denied
         })
         findViewById<TextView>(R.id.ovName).text = when {
+            unreachable -> getString(R.string.card_not_checked)
             r.result == "unknown" -> getString(R.string.unknown_card)
             else -> r.name
         }
@@ -327,11 +340,13 @@ class KioskActivity : Activity(), NfcAdapter.ReaderCallback, Door.Listener {
             info -> ""
             ok && r.direction == "in" -> getString(R.string.entry_logged)
             ok && r.direction == "out" -> getString(R.string.exit_logged)
+            ok -> ""
+            unreachable -> getString(R.string.try_again)
             r.result == "unknown" -> r.uid
             r.result == "disabled" -> getString(R.string.card_disabled)
             r.result == "expired" -> getString(R.string.card_expired)
-            r.online -> getString(R.string.door_disabled)
-            else -> getString(R.string.try_again)
+            r.result == "not_member" -> getString(R.string.not_member)
+            else -> getString(R.string.door_disabled)
         }
         findViewById<TextView>(R.id.ovSub).text = sub
         overlay.visibility = View.VISIBLE
@@ -382,8 +397,10 @@ class KioskActivity : Activity(), NfcAdapter.ReaderCallback, Door.Listener {
         const val SYNC_INTERVAL_MS = 5000L     // same heartbeat as the firmware
         const val SCAN_REPEAT_MS = 2000L       // ignore the same card held on the phone
         const val RESULT_HOLD_MS = 5000L
+        // SecureEntry tokens, same as res/values/colors.xml and cloudflare/src/live.html
         val OK = Color.parseColor("#22C55E")
         val BAD = Color.parseColor("#EF4444")
-        val INFO = Color.parseColor("#60A5FA")
+        val INFO = Color.parseColor("#818CF8")
+        val WARN = Color.parseColor("#F59E0B")
     }
 }

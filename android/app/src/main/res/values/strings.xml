@@ -47,4 +47,6 @@
     <string name="exit_logged">Exit recorded</string>
     <string name="remote_open">Door opened remotely</string>
     <string name="try_again">Check the network and try again</string>
+    <string name="card_not_checked">Card not checked</string>
+    <string name="not_member">Not a member of this class</string>
 </resources>
