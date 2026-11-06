@@ -29,7 +29,10 @@ export type PageCtx = {
   userId?: number;
   owner?: boolean;
   orgName?: string;
+  locked?: boolean;    // company registered but not yet approved: no panel menu
+  pending?: number;    // registrations waiting (shown to server owners)
   endpoint: string;
+  origin: string;      // https://host, for canonical and Open Graph URLs
   csrf: string;
   flashes: [string, string][];
 };
@@ -41,7 +44,39 @@ const NAV: [string, string, string][] = [
   ["attendance", "/attendance", "حضور روزانه"], ["settings", "/settings", "تنظیمات"],
 ];
 
-export function layout(c: PageCtx, title: string, body: Safe): Safe {
+// --- SEO --------------------------------------------------------------------------
+
+export const SITE_NAME = "کنترل تردد";
+export const SITE_DESC = "سامانهٔ آنلاین حضور و غیاب و کنترل تردد با کارت RFID و گوشی NFC برای شرکت‌ها، مدارس و دانشگاه‌ها: ثبت ورود و خروج، حضور در کلاس، نمایشگر زنده و گزارش‌گیری.";
+
+/** Search-engine metadata for public pages; pages without it get no description (and noindex via header). */
+export type Meta = { description: string; path: string; jsonld?: unknown[] };
+
+const ldJson = (o: unknown) => raw(`<script type="application/ld+json">${JSON.stringify(o).replace(/</g, "\\u003c")}</script>`);
+
+function metaTags(c: PageCtx, title: string, m: Meta) {
+  const url = c.origin + m.path, img = c.origin + "/static/og.png";
+  return html`
+<meta name="description" content="${m.description}">
+<link rel="canonical" href="${url}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="${SITE_NAME}">
+<meta property="og:locale" content="fa_IR">
+<meta property="og:title" content="${title}">
+<meta property="og:description" content="${m.description}">
+<meta property="og:url" content="${url}">
+<meta property="og:image" content="${img}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="${SITE_NAME} — حضور و غیاب با کارت">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${title}">
+<meta name="twitter:description" content="${m.description}">
+<meta name="twitter:image" content="${img}">
+${(m.jsonld || []).map(ldJson)}`;
+}
+
+export function layout(c: PageCtx, title: string, body: Safe, meta?: Meta): Safe {
   const navOn = (ep: string) => c.endpoint === ep || (ep === "cards" && (c.endpoint === "card_new" || c.endpoint === "card_edit"))
     || (ep === "classes" && (c.endpoint === "class_view" || c.endpoint === "class_session"));
   return html`<!doctype html>
@@ -50,6 +85,9 @@ export function layout(c: PageCtx, title: string, body: Safe): Safe {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#2563eb">
+${meta ? metaTags(c, title, meta) : ""}
 <link rel="preload" href="${FONT}" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -57,8 +95,8 @@ export function layout(c: PageCtx, title: string, body: Safe): Safe {
 ${c.user ? html`<header><div class="in">
   <span class="brand">🔑 ${c.orgName || "کنترل تردد"}</span>
   <nav>
-    ${c.orgName ? NAV.map(([ep, href, label]) => html`<a href="${href}" class="${navOn(ep) ? "on" : ""}">${label}</a>`) : ""}
-    ${c.owner ? html`<a href="/admin" class="${c.endpoint === "admin" ? "on" : ""}">مدیریت سرور</a>` : ""}
+    ${c.orgName && !c.locked ? NAV.map(([ep, href, label]) => html`<a href="${href}" class="${navOn(ep) ? "on" : ""}">${label}</a>`) : ""}
+    ${c.owner ? html`<a href="/admin" class="${c.endpoint === "admin" ? "on" : ""}">مدیریت سرور${c.pending ? html` <span class="pill warn">${J.fa(c.pending)}</span>` : ""}</a>` : ""}
   </nav>
   <form method="post" action="/logout">${csrf(c)}<button class="btn sec sm">خروج (${c.user})</button></form>
 </div></header>` : ""}
@@ -112,10 +150,143 @@ export function loginPage(c: PageCtx) {
   <h1>🔑 کنترل تردد</h1>
   <form method="post">
     ${csrf(c)}
-    <label>نام کاربری</label><input name="username" dir="ltr" autocomplete="username" autofocus required>
+    <label>ایمیل یا نام کاربری</label><input name="username" dir="ltr" autocomplete="username" autofocus required>
     <label>رمز عبور</label><input name="password" dir="ltr" type="password" autocomplete="current-password" required>
     <p><button class="btn">ورود</button></p>
   </form>
+  <p class="mut">حساب ندارید؟ <a href="/register">ثبت‌نام سازمان</a> · <a href="/">صفحه اصلی</a></p>
+</div>`);
+}
+
+// --- public pages: landing, sign-up, waiting for approval -------------------------
+
+/** Questions and answers shown on the landing page and published as FAQPage data (for search and AI answers). */
+export const FAQ: [string, string][] = [
+  ["سامانهٔ کنترل تردد چیست؟",
+    "یک سامانهٔ تحت وب برای حضور و غیاب و کنترل تردد با کارت است. افراد کارت RFID یا کارت NFC خود را به دستگاه نزدیک می‌کنند و ساعت ورود و خروج، حضور در کلاس و گزارش‌ها در پنل سازمان ثبت می‌شود."],
+  ["چه دستگاهی برای کارت‌خوانی لازم است؟",
+    "دو گزینه دارید: یک دستگاه کارت‌خوان ارزان با ماژول RC522 و برد Wemos D1 mini (ESP8266) که با Wi-Fi به سامانه وصل می‌شود، یا یک گوشی اندرویدی دارای NFC با برنامهٔ رایگان «در» که گوشی را به دستگاه کارت‌خوان و نمایشگر کیوسک تبدیل می‌کند."],
+  ["از چه کارت‌هایی پشتیبانی می‌شود؟",
+    "کارت‌ها و تگ‌های RFID با فرکانس ۱۳٫۵۶ مگاهرتز مانند MIFARE Classic و NTAG، از جمله بیشتر کارت‌های پرسنلی و دانشجویی. هر کارت با شناسهٔ یکتای خود (UID) در پنل ثبت می‌شود."],
+  ["حضور و غیاب کلاس چطور کار می‌کند؟",
+    "برای هر کلاس اعضا و زمان‌بندی هفتگی یا تک‌جلسه‌ای روی یک دستگاه تعریف می‌کنید. هر کارتی که در زمان جلسه زده شود به همان جلسه ثبت می‌شود و فهرست حاضران، غایبان و مدت حضور هر نفر را می‌بینید و خروجی CSV می‌گیرید."],
+  ["چطور برای سازمانم ثبت‌نام کنم؟",
+    "فرم ثبت‌نام را با نام سازمان، ایمیل، شماره تلفن همراه و تعداد کاربران و دستگاه‌های مورد نیاز پر کنید. پس از تأیید مدیر سامانه، پنل سازمان شما فعال می‌شود و می‌توانید دستگاه‌ها و کارت‌ها را تعریف کنید."],
+  ["آیا داده‌های هر سازمان جداست؟",
+    "بله. هر سازمان کاربران، کارت‌ها، دستگاه‌ها، کلاس‌ها و گزارش‌های جداگانه دارد و داده‌های سازمان‌های دیگر را نمی‌بیند."],
+];
+
+export function landingPage(c: PageCtx) {
+  const feature = (icon: string, title: string, text: string) =>
+    html`<div class="box feature"><div class="ficon" aria-hidden="true">${icon}</div><h3>${title}</h3><p class="mut">${text}</p></div>`;
+  const title = "کنترل تردد | سامانهٔ حضور و غیاب با کارت RFID و NFC";
+  const site = c.origin + "/";
+  const jsonld = [
+    {
+      "@context": "https://schema.org", "@type": "WebSite", "@id": site + "#website",
+      url: site, name: SITE_NAME, inLanguage: "fa-IR", description: SITE_DESC,
+    },
+    {
+      "@context": "https://schema.org", "@type": "SoftwareApplication", "@id": site + "#app",
+      name: SITE_NAME, alternateName: "سامانهٔ حضور و غیاب با کارت",
+      applicationCategory: "BusinessApplication", applicationSubCategory: "Attendance and access control",
+      operatingSystem: "Web, Android", inLanguage: "fa-IR", url: site, image: c.origin + "/static/og.png",
+      description: SITE_DESC,
+      featureList: [
+        "ثبت ورود و خروج با کارت RFID", "گوشی اندرویدی NFC به‌عنوان دستگاه کارت‌خوان", "نمایشگر زنده کنار در",
+        "حضور و غیاب کلاس با زمان‌بندی", "گزارش تردد و خروجی CSV", "چند سازمانی با داده‌های جدا",
+      ],
+    },
+    {
+      "@context": "https://schema.org", "@type": "FAQPage", inLanguage: "fa-IR",
+      mainEntity: FAQ.map(([q, a]) => ({ "@type": "Question", name: q, acceptedAnswer: { "@type": "Answer", text: a } })),
+    },
+  ];
+  return layout(c, title, html`
+<section class="hero">
+  <div class="brandline">🔑 ${SITE_NAME}</div>
+  <h1>سامانهٔ حضور و غیاب و کنترل تردد با کارت، برای سازمان شما</h1>
+  <p class="lead">کارمندان یا دانشجویان کارت RFID را به دستگاه یا گوشی NFC نزدیک می‌کنند؛ ساعت ورود و خروج، حضور در کلاس‌ها و گزارش‌ها همه در یک پنل تحت وب ثبت می‌شود.</p>
+  <div class="cta">
+    <a class="btn big" href="/register">ثبت‌نام سازمان</a>
+    <a class="btn sec big" href="/login">ورود به پنل</a>
+  </div>
+</section>
+
+<section aria-labelledby="f-title">
+<h2 id="f-title" class="sec-title">امکانات</h2>
+<div class="features">
+  ${feature("📡", "دستگاه کارت‌خوان RFID", "دستگاه ارزان با ماژول RC522 و Wemos D1 mini، یا یک گوشی اندرویدی دارای NFC را به‌عنوان دستگاه ورود تعریف کنید.")}
+  ${feature("🖥️", "نمایشگر زندهٔ تردد", "نام و نتیجهٔ هر تردد همان لحظه روی نمایشگر یا تبلت کنار در دیده می‌شود.")}
+  ${feature("🎓", "حضور و غیاب کلاس", "برای هر کلاس اعضا و زمان‌بندی تعریف کنید و حاضران، غایبان و مدت حضور هر جلسه را ببینید.")}
+  ${feature("📊", "گزارش و خروجی", "گزارش تردد، حضور روزانه، افراد داخل ساختمان و خروجی CSV برای هر بازهٔ زمانی.")}
+  ${feature("🏢", "چند سازمانی", "هر شرکت، مدرسه یا دانشگاه کاربران، کارت‌ها و گزارش‌های جداگانهٔ خود را دارد.")}
+  ${feature("🔌", "اتصال به سامانه‌های دیگر", "API فقط‌خواندنی و Webhook برای ارسال هر تردد به نرم‌افزار حقوق و دستمزد یا سامانه‌های دیگر.")}
+</div>
+</section>
+
+<section class="box steps" aria-labelledby="s-title">
+  <h2 id="s-title">چطور شروع کنم؟</h2>
+  <ol>
+    <li>فرم ثبت‌نام را با ایمیل، شماره تماس و تعداد کاربران و دستگاه‌های مورد نیاز پر کنید.</li>
+    <li>مدیر سامانه درخواست شما را بررسی و تأیید می‌کند.</li>
+    <li>وارد پنل شوید، دستگاه‌ها و کارت‌ها را تعریف کنید و شروع کنید.</li>
+  </ol>
+  <p><a class="btn" href="/register">شروع ثبت‌نام</a></p>
+</section>
+
+<section class="box faq" aria-labelledby="q-title">
+  <h2 id="q-title">پرسش‌های متداول</h2>
+  ${FAQ.map(([q, a]) => html`<details><summary><h3>${q}</h3></summary><p>${a}</p></details>`)}
+</section>
+
+<footer class="site-foot mut">© ${SITE_NAME} · <a href="/register">ثبت‌نام</a> · <a href="/login">ورود</a></footer>`,
+    { description: SITE_DESC, path: "/", jsonld });
+}
+
+export function registerPage(c: PageCtx, v: { name: string; email: string; phone: string; users: string; devices: string }) {
+  return layout(c, "ثبت‌نام سازمان | کنترل تردد، حضور و غیاب با کارت", html`
+<div class="register box">
+  <h1>ثبت‌نام سازمان</h1>
+  <p class="mut">پس از ثبت‌نام وارد پنل می‌شوید، اما تا تأیید مدیر سامانه پنل قفل است.</p>
+  <form method="post">
+    ${csrf(c)}
+    <div class="hp" aria-hidden="true"><label>وب‌سایت</label><input name="website" tabindex="-1" autocomplete="off"></div>
+    <label>نام سازمان / شرکت / مدرسه</label><input name="name" value="${v.name}" maxlength="60" required autofocus>
+    <div class="row">
+      <div><label>ایمیل (نام کاربری شما)</label><input name="email" type="email" dir="ltr" value="${v.email}" autocomplete="email" required></div>
+      <div><label>شماره تلفن همراه</label><input name="phone" type="tel" dir="ltr" value="${v.phone}" placeholder="09121234567" autocomplete="tel" required></div>
+    </div>
+    <div class="row">
+      <div><label>تعداد کاربران پنل مورد نیاز</label><input name="users" type="number" dir="ltr" min="1" max="1000" value="${v.users}" required></div>
+      <div><label>تعداد دستگاه‌های مورد نیاز</label><input name="devices" type="number" dir="ltr" min="1" max="1000" value="${v.devices}" required></div>
+    </div>
+    <div class="row">
+      <div><label>رمز عبور (حداقل ۸ کاراکتر)</label><input name="password" type="password" dir="ltr" minlength="8" autocomplete="new-password" required></div>
+      <div><label>تکرار رمز عبور</label><input name="password2" type="password" dir="ltr" minlength="8" autocomplete="new-password" required></div>
+    </div>
+    <p><button class="btn">ثبت‌نام</button></p>
+  </form>
+  <p class="mut">قبلاً ثبت‌نام کرده‌اید؟ <a href="/login">ورود</a> · <a href="/">صفحه اصلی</a></p>
+</div>`, {
+    path: "/register",
+    description: "ثبت‌نام رایگان سازمان در سامانهٔ کنترل تردد و حضور و غیاب با کارت RFID: نام سازمان، ایمیل، شماره تماس و تعداد کاربران و دستگاه‌ها را وارد کنید.",
+  });
+}
+
+export function pendingPage(c: PageCtx, org: Row) {
+  return layout(c, "در انتظار تأیید · کنترل تردد", html`
+<div class="register box">
+  <div class="ficon">⏳</div>
+  <h1>ثبت‌نام «${org.name}» در انتظار تأیید است</h1>
+  <p>درخواست شما دریافت شد. پس از بررسی و تأیید مدیر سامانه، پنل برای شما باز می‌شود و می‌توانید دستگاه‌ها و کارت‌ها را تعریف کنید.</p>
+  <table>
+    <tr><th>ایمیل</th><td class="ltr">${org.email || "—"}</td></tr>
+    <tr><th>تلفن</th><td class="ltr">${org.phone || "—"}</td></tr>
+    <tr><th>کاربران درخواستی</th><td>${org.max_users ? J.fa(org.max_users) : "—"}</td></tr>
+    <tr><th>دستگاه‌های درخواستی</th><td>${org.max_devices ? J.fa(org.max_devices) : "—"}</td></tr>
+  </table>
+  <p><a class="btn sec" href="/">بررسی دوباره</a></p>
 </div>`);
 }
 
@@ -419,10 +590,34 @@ export function settingsPage(c: PageCtx, v: { users: Row[]; nEvents: number }) {
 
 // --- server owner -------------------------------------------------------------------
 
-export function adminPage(c: PageCtx, v: { orgs: Row[]; users: Map<number | null, Row[]>; apiEnabled: boolean; webhook: string }) {
+export function adminPage(c: PageCtx, v: { orgs: Row[]; pending: Row[]; users: Map<number | null, Row[]>; apiEnabled: boolean; webhook: string }) {
   const hidden = (n: string, val: unknown) => html`<input type="hidden" name="${n}" value="${val}">`;
+  const limitInputs = (o: Row) => html`
+    <div><label>سقف کاربران</label><input type="number" name="max_users" dir="ltr" min="0" max="1000" value="${o.max_users ?? ""}" placeholder="نامحدود" style="width:7em"></div>
+    <div><label>سقف دستگاه‌ها</label><input type="number" name="max_devices" dir="ltr" min="0" max="1000" value="${o.max_devices ?? ""}" placeholder="نامحدود" style="width:7em"></div>`;
+  const limit = (n: number | null) => (n ? J.fa(n) : "∞");
   return layout(c, "مدیریت سرور · کنترل تردد", html`
 <h1>مدیریت سرور</h1>
+
+${v.pending.length ? html`
+<div class="box pendingbox">
+  <h2>درخواست‌های ثبت‌نام در انتظار تأیید (${J.fa(v.pending.length)})</h2>
+  <div class="scroll"><table>
+  <thead><tr><th>سازمان</th><th>ایمیل</th><th>تلفن</th><th>ثبت</th><th>تأیید با سقف (خالی = نامحدود)</th><th></th></tr></thead>
+  <tbody>
+  ${v.pending.map((o) => html`
+  <tr>
+    <td><b>${o.name}</b></td>
+    <td class="ltr"><a href="mailto:${o.email}">${o.email}</a></td>
+    <td class="ltr"><a href="tel:${o.phone}">${o.phone}</a></td>
+    <td class="nowrap mut">${ago(o.created_at)}</td>
+    <td><form method="post" class="row">${csrf(c)}${hidden("action", "approve")}${hidden("org", o.id)}${limitInputs(o)}
+      <div class="auto"><button class="btn sm">تأیید</button></div></form></td>
+    <td class="end"><form class="inline" method="post" onsubmit="return confirm(this.dataset.q)" data-q="درخواست ${o.name} رد و حذف شود؟">${csrf(c)}${hidden("action", "reject")}${hidden("org", o.id)}<button class="btn red sm">رد</button></form></td>
+  </tr>`)}
+  </tbody></table></div>
+</div>` : ""}
+
 <p class="mut">هر سازمان (شرکت یا تیم) کاربران، کارت‌ها، دستگاه‌ها، کلاس‌ها و گزارش‌های جداگانه دارد و داده‌های سازمان‌های دیگر را نمی‌بیند. کاربران هر سازمان دستگاه‌های خودشان را تعریف می‌کنند.</p>
 
 <div class="box scroll">
@@ -433,10 +628,10 @@ ${v.orgs.length ? v.orgs.map((o) => {
     const us = v.users.get(o.id) || [];
     return html`
 <tr>
-  <td><b>${o.name}</b></td>
+  <td><b>${o.name}</b>${o.email || o.phone ? html`<div class="mut ltr" style="font-size:12px">${o.email} ${o.phone}</div>` : ""}</td>
   <td>${o.enabled ? html`<span class="pill ok">فعال</span>` : html`<span class="pill bad">غیرفعال</span>`}</td>
-  <td class="ltr">${us.length ? us.map((u) => u.username).join("، ") : html`<span class="mut">—</span>`}</td>
-  <td>${J.fa(o.n_devices)}</td><td>${J.fa(o.n_cards)}</td><td>${J.fa(o.n_classes)}</td>
+  <td class="ltr">${us.length ? us.map((u) => u.username).join("، ") : html`<span class="mut">—</span>`} <span class="mut">(${limit(o.max_users)})</span></td>
+  <td>${J.fa(o.n_devices)} / ${limit(o.max_devices)}</td><td>${J.fa(o.n_cards)}</td><td>${J.fa(o.n_classes)}</td>
   <td class="nowrap mut">${ago(o.last_event)}</td>
   <td class="nowrap end">
     <form class="inline" method="post" action="/admin/view">${csrf(c)}${hidden("org", o.id)}<button class="btn sm">ورود به پنل</button></form>
@@ -445,6 +640,8 @@ ${v.orgs.length ? v.orgs.map((o) => {
         <form method="post">${csrf(c)}${hidden("action", "rename")}${hidden("org", o.id)}
           <label>نام سازمان</label><input name="name" value="${o.name}" required>
           <p><button class="btn sm">ذخیره نام</button></p></form>
+        <form method="post" class="row">${csrf(c)}${hidden("action", "limits")}${hidden("org", o.id)}${limitInputs(o)}
+          <div class="auto"><button class="btn sm">ذخیره سقف</button></div></form>
         <form method="post">${csrf(c)}${hidden("action", "toggle")}${hidden("org", o.id)}
           <p><button class="btn sec sm">${o.enabled ? "غیرفعال کن (ورود کاربران و همه دستگاه‌ها متوقف می‌شود)" : "فعال کن"}</button></p></form>
         <h3>کاربران</h3>

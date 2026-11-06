@@ -50,3 +50,24 @@ details summary{cursor:pointer;color:var(--acc)}
 @media (max-width:600px){main{padding:12px}header nav{order:3;width:100%;overflow-x:auto;display:flex}}
 .popup{position:absolute;inset-inline-end:16px;z-index:5;width:min(360px,90vw);margin-top:6px;text-align:start}
 .end{text-align:end}
+.hero{text-align:center;padding:7vh 0 4vh}
+.hero .brandline{font-weight:700;color:var(--acc);margin-bottom:10px}
+.hero h1{font-size:clamp(22px,4vw,32px);line-height:1.5;margin:0 auto 12px;max-width:720px}
+.hero .lead{color:var(--mut);max-width:620px;margin:0 auto 22px;font-size:16px}
+.cta{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.btn.big{padding:10px 22px;font-size:16px}
+.features{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin-bottom:14px}.features .box{margin:0}
+.feature h2{margin-top:6px}.feature p{margin:0}
+.ficon{font-size:28px}
+.steps ol{margin:0;padding-inline-start:20px}.steps li{margin:6px 0}
+.register{max-width:560px;margin:5vh auto}
+.register th{width:40%}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.pendingbox{border-color:var(--warn)}
+.pendingbox .row>*{min-width:0}
+.feature h3{font-size:15px;margin:6px 0 8px}
+.sec-title{font-size:18px;text-align:center;margin:10px 0 14px}
+.faq details{border-bottom:1px solid var(--line);padding:8px 0}.faq details:last-child{border-bottom:0}
+.faq summary{color:var(--fg)}.faq summary h3{display:inline;font-size:15px;font-weight:600}
+.faq details p{margin:8px 0 2px;color:var(--mut)}
+.site-foot{text-align:center;font-size:13px;padding:10px 0 20px}

@@ -23,6 +23,7 @@ export interface Env {
   LIVE_POLL_MS?: string;           // live screen refresh; each poll is one Worker request
 }
 
+const KIOSK_HOLD_MS = 5000;  // a scan result stays on the kiosk screen this long (live.html HOLD_MS)
 const ONLINE_WINDOW = 30;   // a door counts as online if it synced within this many seconds
 const PAGE_SIZE = 100;
 
@@ -40,6 +41,7 @@ type Ctx = {
   user: Row | null;      // logged-in user
   owner: boolean;        // server owner (no company of their own)
   org: Row | null;       // company being viewed
+  pending: number;       // registrations waiting for approval (server owners only)
   waitUntil: (p: Promise<unknown>) => void;
   form?: FormData;
   endpoint: string;
@@ -66,7 +68,8 @@ const back = (c: Ctx, fallback: string) => {
 function pageCtx(c: Ctx): V.PageCtx {
   return {
     user: c.user?.username, userId: c.user?.id, owner: c.owner, orgName: c.org?.name,
-    endpoint: c.endpoint, csrf: c.session.csrfToken(), flashes: c.session.popFlashes(),
+    locked: Boolean(c.org && !c.org.approved && !c.owner), pending: c.pending,
+    endpoint: c.endpoint, origin: c.url.origin, csrf: c.session.csrfToken(), flashes: c.session.popFlashes(),
   };
 }
 
@@ -91,6 +94,7 @@ async function loadUser(c: Ctx) {
   }
   c.user = u;
   c.owner = u.org_id === null;
+  if (c.owner) c.pending = (await first(c.db, "SELECT COUNT(*) AS n FROM orgs WHERE approved = 0"))?.n || 0;
   const orgId = u.org_id ?? c.session.data.view_org;
   if (orgId) {
     c.org = await first(c.db, "SELECT * FROM orgs WHERE id = ?", orgId);
@@ -202,8 +206,12 @@ async function liveEvents(c: Ctx, orgId: number, doorId: number) {
       ...params, intArg(c.url.searchParams.get("after")));
   }
   const cutoff = now() - ONLINE_WINDOW;
-  const doors = await all(c.db, "SELECT id, name, last_seen FROM devices WHERE org_id = ? ORDER BY name", orgId);
+  const [doors, org] = await Promise.all([
+    all(c.db, "SELECT id, name, last_seen FROM devices WHERE org_id = ? ORDER BY name", orgId),
+    first(c.db, "SELECT name, enabled FROM orgs WHERE id = ?", orgId),
+  ]);
   return json({
+    org: { name: org?.name || "", active: Boolean(org?.enabled) },
     events: rows.map((r) => ({
       id: r.id, name: r.name, uid: r.uid, result: r.result, direction: r.direction, door: r.door || "", class: r.class_name || "",
       time: jtime(r.ts, true), date: jdate(r.ts),
@@ -213,7 +221,7 @@ async function liveEvents(c: Ctx, orgId: number, doorId: number) {
   });
 }
 
-function livePage(v: { kiosk: boolean; doors: Row[]; doorId: number; feedUrl: string; pollMs: number }) {
+function livePage(v: { kiosk: boolean; orgName: string; doors: Row[]; doorId: number; feedUrl: string; pollMs: number }) {
   const doorBlock = v.kiosk
     ? `<span>${esc(v.doors[0].name)}</span>`
     : `<select id="doorSel" aria-label="در">
@@ -222,6 +230,7 @@ function livePage(v: { kiosk: boolean; doors: Row[]; doorId: number; feedUrl: st
       </select>`;
   const js = (x: unknown) => JSON.stringify(x).replace(/</g, "\\u003c");
   let out = liveTemplate
+    .replace("__ORG_NAME__", () => esc(v.orgName))
     .replace("__DOOR_BLOCK__", () => doorBlock)
     .replace("__FEED__", () => js(v.feedUrl))
     .replace("__KIOSK__", () => js(v.kiosk))
@@ -306,7 +315,13 @@ async function apiCards(c: Ctx) {
 // Live-screen link for this door; the Android app shows it full screen.
 async function apiKiosk(c: Ctx) {
   const dev = await deviceFromKey(c);
-  return json({ name: dev.name, url: `/kiosk/${await kioskToken(c.env.SECRET_KEY, dev as { id: number; key: string })}` });
+  return json({
+    name: dev.name,
+    url: `/kiosk/${await kioskToken(c.env.SECRET_KEY, dev as { id: number; key: string })}`,
+    org: { name: dev.org_name, active: Boolean(dev.org_enabled) },
+    lang: "fa",
+    hold_ms: KIOSK_HOLD_MS,
+  });
 }
 
 // --- integration API (read-only, Bearer token, all companies; ?org=<id> to filter) -----
@@ -334,8 +349,10 @@ async function login(c: Ctx) {
   if (!(await ensureAdmin(c))) {
     c.session.flash("هنوز کاربری وجود ندارد. secret با نام ADMIN_PASSWORD را تنظیم کنید یا scripts/set-password.mjs را اجرا کنید.", "error");
   } else if (c.req.method === "POST") {
-    const u = await first(c.db, "SELECT u.*, o.enabled AS org_enabled FROM users u LEFT JOIN orgs o ON o.id = u.org_id WHERE u.username = ?",
-      formStr(c, "username"));
+    const name = formStr(c, "username").trim();
+    const u = await first(c.db,
+      `SELECT u.*, o.enabled AS org_enabled FROM users u LEFT JOIN orgs o ON o.id = u.org_id
+       WHERE u.username IN (?, ?) ORDER BY u.username = ? DESC LIMIT 1`, name, name.toLowerCase(), name);
     if (u && (await checkPassword(u.pw_hash, formStr(c, "password")))) {
       if (u.org_id && !u.org_enabled) {
         c.session.flash("حساب سازمان شما غیرفعال شده است.", "error");
@@ -361,20 +378,149 @@ function logout(c: Ctx) {
 
 // --- live screen ----------------------------------------------------------------------
 
+/** '/': landing page for visitors, the waiting page for unapproved companies, else the live screen. */
+async function home(c: Ctx) {
+  if (!c.user) return page(V.landingPage(pageCtx(c)));
+  if (!c.org) return redirect("/admin");
+  if (!c.owner && !c.org.approved) return page(V.pendingPage(pageCtx(c), c.org));
+  return live(c);
+}
+
+// --- self-registration -----------------------------------------------------------------
+
+const MAX_PENDING = 100;   // stop accepting sign-ups while this many wait for approval
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Persian/Arabic digits -> ASCII, separators dropped: '۰۹۱۲ ۳۴۵-۶۷۸۹' -> '09123456789'. */
+function normalizePhone(s: string): string {
+  return s.replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0))
+    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[\s\-().]/g, "");
+}
+
+const countArg = (v: string) => {
+  const n = intArg(normalizePhone(v), 0);
+  return n >= 1 && n <= 1000 ? n : 0;
+};
+
+async function register(c: Ctx) {
+  if (c.user) return redirect("/");
+  const v = { name: "", email: "", phone: "", users: "1", devices: "1" };
+  if (c.req.method === "POST") {
+    v.name = cleanName(formStr(c, "name"), 60);
+    v.email = formStr(c, "email").trim().toLowerCase();
+    v.phone = normalizePhone(formStr(c, "phone").trim());
+    v.users = formStr(c, "users");
+    v.devices = formStr(c, "devices");
+    const pw = formStr(c, "password");
+    const nUsers = countArg(v.users), nDevices = countArg(v.devices);
+    let err = "";
+    if (formStr(c, "website")) return redirect("/");   // honeypot: only bots fill the hidden field
+    if (!v.name) err = "نام سازمان الزامی است.";
+    else if (!EMAIL_RE.test(v.email) || v.email.length > 120) err = "ایمیل معتبر نیست.";
+    else if (!/^\+?\d{8,15}$/.test(v.phone)) err = "شماره تلفن معتبر نیست (۸ تا ۱۵ رقم).";
+    else if (!nUsers) err = "تعداد کاربران باید بین ۱ تا ۱۰۰۰ باشد.";
+    else if (!nDevices) err = "تعداد دستگاه‌ها باید بین ۱ تا ۱۰۰۰ باشد.";
+    else if (!validPassword(pw)) err = "رمز عبور باید حداقل ۸ کاراکتر باشد.";
+    else if (pw !== formStr(c, "password2")) err = "تکرار رمز عبور یکسان نیست.";
+    else if (await first(c.db, "SELECT 1 AS x FROM users WHERE username = ?", v.email)) err = "با این ایمیل قبلاً ثبت‌نام شده است. وارد شوید.";
+    else if (await first(c.db, "SELECT 1 AS x FROM orgs WHERE name = ?", v.name)) err = "سازمانی با این نام وجود دارد.";
+    else if (((await first(c.db, "SELECT COUNT(*) AS n FROM orgs WHERE approved = 0"))?.n || 0) >= MAX_PENDING) {
+      err = "در حال حاضر امکان ثبت‌نام نیست. بعداً دوباره تلاش کنید.";
+    }
+    if (!err) {
+      try {
+        // one transaction: the company and its first user (the email is the username)
+        await c.db.batch([
+          c.db.prepare("INSERT INTO orgs(name, enabled, approved, email, phone, max_users, max_devices, created_at) VALUES (?, 1, 0, ?, ?, ?, ?, ?)")
+            .bind(v.name, v.email, v.phone, nUsers, nDevices, now()),
+          c.db.prepare("INSERT INTO users(username, pw_hash, org_id) VALUES (?, ?, (SELECT id FROM orgs WHERE name = ?))")
+            .bind(v.email, await hashPassword(pw), v.name),
+        ]);
+      } catch (e) {
+        if (!isUniqueError(e)) throw e;
+        err = "این نام سازمان یا ایمیل قبلاً ثبت شده است.";
+      }
+    }
+    if (err) {
+      c.session.flash(err, "error");
+    } else {
+      const u = await first(c.db, "SELECT id, username FROM users WHERE username = ?", v.email);
+      c.session.clear();
+      c.session.set("uid", u!.id);
+      c.session.set("user", u!.username);
+      return redirect("/");
+    }
+  }
+  return page(V.registerPage(pageCtx(c), v));
+}
+
+// --- search engines and AI crawlers ------------------------------------------------------
+
+const text = (body: string, type = "text/plain") =>
+  new Response(body, { headers: { "Content-Type": `${type}; charset=utf-8`, "Cache-Control": "public, max-age=3600" } });
+
+const PRIVATE_PATHS = ["/api/", "/kiosk/", "/live/", "/dashboard", "/cards", "/doors", "/classes", "/events", "/attendance", "/settings", "/admin", "/logout"];
+
+function robotsTxt(c: Ctx) {
+  const dis = PRIVATE_PATHS.map((p) => `Disallow: ${p}`).join("\n");
+  // AI assistants and answer engines are welcome on the public pages (GEO)
+  const bots = ["GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot", "Claude-SearchBot", "Claude-User", "PerplexityBot",
+    "Perplexity-User", "Google-Extended", "Applebot-Extended", "Bingbot", "Googlebot"];
+  return text(`User-agent: *\nAllow: /\n${dis}\n\n` + bots.map((b) => `User-agent: ${b}\nAllow: /\n${dis}\n`).join("\n")
+    + `\nSitemap: ${c.url.origin}/sitemap.xml\n`);
+}
+
+function sitemapXml(c: Ctx) {
+  const urls = [["/", "1.0"], ["/register", "0.8"]];
+  return text(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.map(([p, pr]) => `  <url><loc>${c.url.origin}${p}</loc><changefreq>weekly</changefreq><priority>${pr}</priority></url>`).join("\n")}
+</urlset>
+`, "application/xml");
+}
+
+/** llms.txt: a plain summary for AI assistants (https://llmstxt.org). */
+function llmsTxt(c: Ctx) {
+  const o = c.url.origin;
+  return text(`# ${V.SITE_NAME} (Attendance & access control with RFID cards)
+
+> ${V.SITE_DESC}
+
+A web service (Persian, fa-IR) where companies, schools and universities record attendance and door access with RFID/NFC cards. Each organization registers, is approved by the operator, then manages its own panel users, card readers, cards, classes and reports.
+
+## Key facts
+- Card readers: a low-cost RC522 + Wemos D1 mini (ESP8266) Wi-Fi device, or an Android phone with NFC running the free door app (kiosk screen).
+- Cards: 13.56 MHz RFID/NFC cards and tags (MIFARE Classic, NTAG), identified by UID.
+- Features: entry/exit log, live door screen, daily attendance, class attendance with weekly or one-off sessions, CSV export, read-only API and webhook, multi-organization with separate data.
+- Sign-up: name, email, mobile number, number of panel users and devices needed; the panel unlocks after operator approval.
+
+## Pages
+- [Home](${o}/): overview, features and FAQ
+- [Register an organization](${o}/register)
+- [Login](${o}/login)
+
+## FAQ
+${V.FAQ.map(([q, a]) => `### ${q}\n${a}`).join("\n\n")}
+`);
+}
+
 async function live(c: Ctx) {
   const doors = await all(c.db, "SELECT id, name FROM devices WHERE org_id = ? ORDER BY name", oid(c));
   const doorId = intArg(c.url.searchParams.get("door"));
-  return livePage({ kiosk: false, doors, doorId, feedUrl: doorId ? `/live/feed?door=${doorId}` : "/live/feed", pollMs: pollMs(c) });
+  return livePage({ kiosk: false, orgName: c.org!.name, doors, doorId, feedUrl: doorId ? `/live/feed?door=${doorId}` : "/live/feed", pollMs: pollMs(c) });
 }
 
 async function liveFeed(c: Ctx) {
   if (!c.user || !c.org) return json({ error: "login required" }, 401);
+  if (!c.owner && !c.org.approved) return json({ error: "waiting for approval" }, 403);
   return liveEvents(c, oid(c), intArg(c.url.searchParams.get("door")));
 }
 
 async function kiosk(c: Ctx, token: string) {
   const dev = await kioskDoor(c, token);
-  return livePage({ kiosk: true, doors: [dev], doorId: dev.id, feedUrl: `/kiosk/${token}/feed`, pollMs: pollMs(c) });
+  const org = await first(c.db, "SELECT name FROM orgs WHERE id = ?", dev.org_id);
+  return livePage({ kiosk: true, orgName: org?.name || "", doors: [dev], doorId: dev.id, feedUrl: `/kiosk/${token}/feed`, pollMs: pollMs(c) });
 }
 
 async function kioskFeed(c: Ctx, token: string) {
@@ -523,6 +669,13 @@ async function doorNew(c: Ctx) {
   if (!v.name) {
     c.session.flash("نام در الزامی است.", "error");
     return redirect("/doors");
+  }
+  if (!c.owner && c.org!.max_devices !== null) {
+    const n = await first(c.db, "SELECT COUNT(*) AS n FROM devices WHERE org_id = ?", oid(c));
+    if ((n?.n || 0) >= c.org!.max_devices) {
+      c.session.flash(`سقف دستگاه‌های سازمان شما ${J.fa(c.org!.max_devices)} است. برای افزایش با مدیر سرور تماس بگیرید.`, "error");
+      return redirect("/doors");
+    }
   }
   const key = randomToken(18);
   try {
@@ -827,8 +980,12 @@ async function settings(c: Ctx) {
   if (c.req.method === "POST") {
     const action = formStr(c, "action");
     if (action === "password") await changeOwnPassword(c);
-    else if (action === "add_user") await addUser(c, oid(c));
-    else if (action === "del_user") {
+    else if (action === "add_user") {
+      const n = await first(c.db, "SELECT COUNT(*) AS n FROM users WHERE org_id = ?", oid(c));
+      if (!c.owner && c.org!.max_users !== null && (n?.n || 0) >= c.org!.max_users) {
+        c.session.flash(`سقف کاربران سازمان شما ${J.fa(c.org!.max_users)} است. برای افزایش با مدیر سرور تماس بگیرید.`, "error");
+      } else await addUser(c, oid(c));
+    } else if (action === "del_user") {
       const id = intArg(formStr(c, "id"));
       const n = await first(c.db, "SELECT COUNT(*) AS n FROM users WHERE org_id = ?", oid(c));
       if ((n?.n || 0) <= 1 && !c.owner) c.session.flash("آخرین کاربر سازمان قابل حذف نیست.", "error");
@@ -873,6 +1030,19 @@ async function admin(c: Ctx) {
           if (!isUniqueError(e)) throw e;
           c.session.flash("سازمانی با این نام وجود دارد.", "error");
         }
+      }
+    } else if (action === "approve" || action === "limits") {
+      const lim = (k: string) => countArg(formStr(c, k)) || null;   // empty or 0 = unlimited
+      const org = await first(c.db, "SELECT * FROM orgs WHERE id = ?", orgId);
+      if (org) {
+        await run(c.db, "UPDATE orgs SET approved = 1, max_users = ?, max_devices = ? WHERE id = ?", lim("max_users"), lim("max_devices"), orgId);
+        c.session.flash(action === "approve" ? `سازمان «${org.name}» تأیید شد و اکنون به پنل دسترسی دارد.` : "سقف‌ها ذخیره شد.", "ok");
+      }
+    } else if (action === "reject") {
+      const org = await first(c.db, "SELECT * FROM orgs WHERE id = ? AND approved = 0", orgId);
+      if (org) {
+        await run(c.db, "DELETE FROM orgs WHERE id = ?", orgId);   // its user goes with it (ON DELETE CASCADE)
+        c.session.flash(`درخواست «${org.name}» رد و حذف شد.`, "ok");
       }
     } else if (action === "rename") {
       const name = cleanName(formStr(c, "name"), 60);
@@ -924,13 +1094,13 @@ async function admin(c: Ctx) {
          (SELECT COUNT(*) FROM cards WHERE org_id = o.id) AS n_cards,
          (SELECT COUNT(*) FROM classes WHERE org_id = o.id) AS n_classes,
          (SELECT MAX(ts) FROM events WHERE org_id = o.id) AS last_event
-       FROM orgs o ORDER BY o.name COLLATE NOCASE`),
+       FROM orgs o ORDER BY o.approved, o.name COLLATE NOCASE`),
     all(c.db, "SELECT id, username, org_id FROM users ORDER BY username"),
   ]);
   const byOrg = new Map<number | null, Row[]>();
   for (const u of users) byOrg.set(u.org_id, [...(byOrg.get(u.org_id) || []), u]);
   return page(V.adminPage(pageCtx(c), {
-    orgs, users: byOrg, apiEnabled: Boolean(c.env.ACCESSCTL_API_TOKEN), webhook: c.env.ACCESSCTL_WEBHOOK_URL || "",
+    orgs: orgs.filter((o) => o.approved), pending: orgs.filter((o) => !o.approved).sort((a, b) => a.created_at - b.created_at), users: byOrg, apiEnabled: Boolean(c.env.ACCESSCTL_API_TOKEN), webhook: c.env.ACCESSCTL_WEBHOOK_URL || "",
   }));
 }
 
@@ -966,7 +1136,11 @@ route("GET", "/api/v1/presence", "api_presence", apiPresence, "none");
 route("GET", "/api/v1/events", "api_events", apiEvents, "none");
 route("GET,POST", "/login", "login", login, "none");
 route("POST", "/logout", "logout", logout, "none");
-route("GET", "/", "live", live);
+route("GET", "/", "live", home, "none");
+route("GET,POST", "/register", "register", register, "none");
+route("GET", "/robots.txt", "robots", robotsTxt, "none");
+route("GET", "/sitemap.xml", "sitemap", sitemapXml, "none");
+route("GET", "/llms.txt", "llms", llmsTxt, "none");
 route("GET", "/live/feed", "live_feed", liveFeed, "none");
 route("GET", "/kiosk/:token", "kiosk", kiosk, "none");
 route("GET", "/kiosk/:token/feed", "kiosk_feed", kioskFeed, "none");
@@ -1028,7 +1202,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
 
   const session = isApi ? new Session({}, env.SECRET_KEY) : await Session.load(req, env.SECRET_KEY);
   const c: Ctx = {
-    req, env, url, db: env.DB, session, user: null, owner: false, org: null,
+    req, env, url, db: env.DB, session, user: null, owner: false, org: null, pending: 0,
     waitUntil: (p) => ctx.waitUntil(p), endpoint: r.endpoint,
   };
 
@@ -1046,6 +1220,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       res = redirect(`/login?next=${encodeURIComponent(url.pathname)}`);
     } else if (r.auth === "login" && !c.org) {
       res = redirect("/admin");
+    } else if (r.auth === "login" && !c.owner && !c.org!.approved) {
+      res = page(V.pendingPage(pageCtx(c), c.org!));   // registered, waiting for a server owner
     } else if (r.auth === "owner" && !c.owner) {
       res = page(V.errorPage(403, "این صفحه فقط برای مدیر سرور است."), 403);
     } else {
@@ -1059,6 +1235,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     }
     const err = e as HttpError;
     res = isApi ? json({ error: err.message || "error" }, err.status) : page(V.errorPage(err.status, err.message || "پیدا نشد."), err.status);
+  }
+
+  // only the public landing and sign-up pages may be indexed
+  const indexable = !c.user && (r.endpoint === "live" || r.endpoint === "register") && res.status === 200;
+  if (!indexable && !["robots", "sitemap", "llms"].includes(r.endpoint)) {
+    res = new Response(res.body, res);
+    res.headers.set("X-Robots-Tag", "noindex, nofollow");
   }
 
   if (session.dirty) {

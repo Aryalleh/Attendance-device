@@ -7,128 +7,172 @@
 <link rel="preload" href="/static/fonts/Vazirmatn.woff2" as="font" type="font/woff2" crossorigin>
 <style>
 @font-face{font-family:"Vazirmatn";src:url("/static/fonts/Vazirmatn.woff2") format("woff2");font-weight:100 900;font-display:swap}
-:root{--bg:#0e1116;--panel:#161a22;--line:#262c38;--fg:#eef1f6;--mut:#8b93a3;
-  --ok:#22c55e;--ok-bg:#0d2a1a;--bad:#ef4444;--bad-bg:#2e1012;--info:#60a5fa;--info-bg:#0f2036}
+/* SecureEntry kiosk tokens (see the Door Kiosk design handoff) */
+:root{--bg:#0f172a;--surface:#1e293b;--surface-2:#1e293b99;--line:#334155;--fg:#f8fafc;--mut:#94a3b8;--dim:#64748b;
+  --brand:#4f46e5;--brand-soft:#818cf8;
+  --ok:#22c55e;--ok-fg:#4ade80;--bad:#ef4444;--bad-fg:#f87171;--info:#6366f1;--info-fg:#a5b4fc;--warn:#f59e0b;--warn-fg:#fbbf24}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:"Vazirmatn",Tahoma,system-ui,sans-serif;
-  display:grid;grid-template-rows:auto 1fr auto;overflow:hidden}
+  display:grid;grid-template-rows:auto 1fr auto;overflow:hidden;font-variant-numeric:tabular-nums}
 button,select{font:inherit;color:inherit}
+svg{display:block}
 
 /* top bar */
-.top{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-.door{display:flex;align-items:center;gap:8px;font-weight:600;font-size:18px}
-.dot{width:10px;height:10px;border-radius:50%;background:var(--mut)}
-.dot.on{background:var(--ok);box-shadow:0 0 0 4px #22c55e22}.dot.off{background:var(--bad)}
-.door select{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px 8px}
-.clock{margin-inline-start:auto;text-align:end;line-height:1.2}
-.clock b{display:block;font-size:30px;font-variant-numeric:tabular-nums;letter-spacing:.5px}
+.top{display:flex;align-items:center;gap:16px 24px;padding:16px 32px;background:var(--surface-2);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:12px}
+.logo{width:40px;height:40px;border-radius:10px;background:var(--brand);display:grid;place-items:center;color:#fff;flex:none}
+.logo svg{width:20px;height:20px}
+.brand b{display:block;font-size:18px;line-height:1.2}
+.brand span{display:block;color:var(--mut);font-size:12px}
+.door{display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;background:var(--bg);border:1px solid var(--line)}
+.door>svg{width:18px;height:18px;color:var(--brand-soft)}
+.door>span:first-of-type,.door select{font-weight:700}
+.door select{background:transparent;border:0;padding:0 2px}
+.door select option{background:var(--surface)}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--dim);flex:none}
+.dot.on{background:var(--ok)}.dot.off{background:var(--bad)}.dot.warn{background:var(--warn)}
+#doorState{color:var(--mut);font-size:14px}
+.pill{display:none;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;font-size:14px;font-weight:500;
+  background:#f59e0b26;border:1px solid #f59e0b99;color:#fcd34d}
+.pill.show{display:flex}
+.pill svg{width:16px;height:16px;flex:none}
+.clock{margin-inline-start:auto;text-align:end;line-height:1.25}
+.clock b{display:block;font-size:30px;letter-spacing:.5px;direction:ltr}
 .clock span{color:var(--mut);font-size:14px}
-.tools{display:flex;gap:6px}
-.tools button,.tools a{background:var(--panel);border:1px solid var(--line);border-radius:10px;width:42px;height:42px;
+.tools{display:flex;gap:8px}
+.tools button,.tools a{background:var(--surface);border:1px solid var(--line);border-radius:10px;width:42px;height:42px;
   display:grid;place-items:center;cursor:pointer;text-decoration:none;color:var(--fg)}
 .tools svg{width:20px;height:20px}
 
 /* stage */
-.stage{display:grid;place-items:center;padding:24px;transition:background .35s ease}
-.stage.ok{background:radial-gradient(circle at 50% 40%,var(--ok-bg),var(--bg) 70%)}
-.stage.bad{background:radial-gradient(circle at 50% 40%,var(--bad-bg),var(--bg) 70%)}
-.stage.info{background:radial-gradient(circle at 50% 40%,var(--info-bg),var(--bg) 70%)}
-.card{text-align:center;max-width:900px}
-.icon{width:min(34vh,220px);height:min(34vh,220px);margin:0 auto 22px;border-radius:50%;display:grid;place-items:center;
-  border:3px solid var(--line);color:var(--mut)}
-.icon svg{width:52%;height:52%}
-.ok .icon{border-color:var(--ok);color:var(--ok);background:#22c55e14}
-.bad .icon{border-color:var(--bad);color:var(--bad);background:#ef444414}
-.info .icon{border-color:var(--info);color:var(--info);background:#60a5fa14}
-.idle .icon{animation:pulse 2.4s ease-in-out infinite}
-@keyframes pulse{0%,100%{transform:scale(1);opacity:.7}50%{transform:scale(1.05);opacity:1}}
+.stage{display:grid;place-items:center;padding:24px 32px;transition:background .35s ease}
+.stage.ok{background:radial-gradient(circle at 50% 40%,#22c55e2e,transparent 60%)}
+.stage.bad{background:radial-gradient(circle at 50% 40%,#ef44442e,transparent 60%)}
+.stage.info{background:radial-gradient(circle at 50% 40%,#6366f138,transparent 60%)}
+.stage.warn{background:radial-gradient(circle at 50% 40%,#f59e0b29,transparent 60%)}
+.card{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;max-width:960px}
+.ring{position:relative;width:min(26vh,192px);height:min(26vh,192px);margin-bottom:8px;border-radius:50%;display:grid;place-items:center;
+  border:4px solid #6366f199;background:#6366f11a;color:var(--brand-soft)}
+.ring svg{width:46%;height:46%}
+.idle .ring::after{content:"";position:absolute;inset:-14%;border-radius:50%;border:2px solid #6366f14d;animation:pulse 2.4s ease-in-out infinite}
+.ok .ring{border-color:var(--ok);background:#22c55e26;color:var(--ok-fg)}
+.bad .ring{border-color:var(--bad);background:#ef444426;color:var(--bad-fg)}
+.info .ring{border-color:var(--info);background:#6366f126;color:var(--info-fg)}
+.warn .ring{border-color:var(--warn);background:#f59e0b26;color:var(--warn-fg)}
+@keyframes pulse{0%,100%{transform:scale(.94);opacity:.5}50%{transform:scale(1);opacity:1}}
 .pop{animation:pop .45s cubic-bezier(.2,1.4,.4,1)}
 @keyframes pop{from{transform:scale(.85);opacity:0}to{transform:scale(1);opacity:1}}
-.title{font-size:clamp(22px,4vh,38px);font-weight:600;margin:0}
-.ok .title{color:var(--ok)}.bad .title{color:var(--bad)}.info .title{color:var(--info)}
-.name{font-size:clamp(40px,10vh,92px);font-weight:800;margin:6px 0 4px;line-height:1.15}
-.sub{font-size:clamp(17px,2.8vh,26px);color:var(--mut)}
-.uid{font-family:ui-monospace,Consolas,monospace;direction:ltr;unicode-bidi:isolate}
-.idle .title{color:var(--mut);font-weight:500}
-.bar{height:4px;background:currentColor;border-radius:2px;margin:26px auto 0;width:220px;opacity:.6;transform-origin:center}
-.idle .bar{display:none}
-.run .bar{animation:shrink var(--hold) linear forwards}
+.title{font-size:clamp(22px,4.5vh,36px);font-weight:700;margin:0;color:#cbd5e1}
+.ok .title{color:var(--ok-fg)}.bad .title{color:var(--bad-fg)}.info .title{color:var(--info-fg)}.warn .title{color:var(--warn-fg)}
+.name{font-size:clamp(40px,11vh,88px);font-weight:900;line-height:1.2;color:#fff;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.name:empty,.sub:empty{display:none}
+.sub{font-size:clamp(17px,3vh,24px);color:var(--mut)}
+.uid{font-family:ui-monospace,Consolas,monospace;direction:ltr;unicode-bidi:isolate;color:#cbd5e1}
+.bar{height:4px;width:224px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;width:100%;background:currentColor;opacity:.75;transform-origin:right}
+.idle .bar,.warn .bar,.suspended .bar{display:none}
+.run .bar i{animation:shrink var(--hold) linear forwards}
+.ok .bar{color:var(--ok)}.bad .bar{color:var(--bad)}.info .bar{color:var(--info)}
 @keyframes shrink{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+.badge{display:none;padding:6px 16px;border-radius:999px;background:#f59e0b26;color:#fcd34d;font-size:14px;font-weight:700}
+.suspended .badge{display:block}
 
 /* recent strip */
-.recent{display:flex;gap:10px;padding:12px 22px 16px;border-top:1px solid var(--line);overflow-x:auto;min-height:84px}
-.recent:empty::before{content:"هنوز ترددی ثبت نشده است";color:var(--mut);align-self:center}
-.chip{flex:0 0 auto;background:var(--panel);border:1px solid var(--line);border-inline-start:4px solid var(--mut);
-  border-radius:10px;padding:8px 14px;min-width:150px;line-height:1.35}
+.recent{display:flex;flex-direction:column;gap:12px;padding:16px 32px 20px;border-top:1px solid var(--line);background:var(--bg)}
+.recent>span{color:var(--dim);font-size:12px;font-weight:700;letter-spacing:.1em}
+.chips{display:flex;gap:12px;overflow-x:auto;min-height:62px}
+.chips:empty::before{content:"هنوز ترددی ثبت نشده است";color:var(--mut);align-self:center}
+.chip{flex:0 0 auto;display:flex;flex-direction:column;gap:2px;background:var(--surface);border:1px solid var(--line);
+  border-inline-start:4px solid var(--dim);border-radius:12px;padding:10px 16px;min-width:180px}
 .chip.ok{border-inline-start-color:var(--ok)}.chip.bad{border-inline-start-color:var(--bad)}.chip.info{border-inline-start-color:var(--info)}
-.chip b{display:block;font-size:15px;white-space:nowrap}
+.chip b{font-size:15px;white-space:nowrap}
 .chip span{color:var(--mut);font-size:13px;white-space:nowrap}
+body.is-suspended .recent{display:none}
 
-/* banners */
-.banner{position:fixed;inset-inline:0;top:84px;margin:auto;width:fit-content;max-width:92vw;background:#1f2633;
+/* sound hint */
+.banner{position:fixed;inset-inline:0;bottom:120px;margin:auto;width:fit-content;max-width:92vw;background:var(--surface);
   border:1px solid var(--line);border-radius:12px;padding:10px 18px;font-size:15px;display:none;cursor:pointer}
 .banner.show{display:block}
-.banner.err{background:var(--bad-bg);border-color:var(--bad)}
-@media (max-width:600px){.top{padding:10px 14px}.clock b{font-size:22px}.recent{padding:10px 14px}}
+@media (prefers-reduced-motion:reduce){.idle .ring::after,.pop{animation:none}}
+@media (max-width:700px){.top{padding:12px 16px;gap:10px 14px}.brand span{display:none}.clock b{font-size:22px}
+  .recent{padding:12px 16px}.stage{padding:16px}.tools button,.tools a{width:38px;height:38px}}
 </style>
 </head>
 <body>
-<div class="top">
-  <div class="door">
-    <span class="dot" id="dot"></span>
-    __DOOR_BLOCK__
+<header class="top">
+  <div class="brand">
+    <div class="logo"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l8 3v6c0 5-3.4 9.3-8 11-4.6-1.7-8-6-8-11V5l8-3zm0 2.2L6 6.4V11c0 3.9 2.5 7.4 6 8.9V4.2z"/></svg></div>
+    <div><b>SecureEntry</b><span>__ORG_NAME__</span></div>
   </div>
+  <div class="door">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4h3a2 2 0 0 1 2 2v14M2 20h3M13 20h9M10 12v.01"/><path d="M13 4.6v16.2L5 19V5.6l8-1z"/></svg>
+    __DOOR_BLOCK__
+    <span class="dot" id="dot"></span><span id="doorState"></span>
+  </div>
+  <div class="pill" id="netPill"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 1 21h22L12 2zm1 15h-2v2h2v-2zm0-7h-2v5h2v-5z"/></svg><span id="netText"></span></div>
   <div class="clock"><b id="time">--:--:--</b><span id="date"></span></div>
   <div class="tools">
     <button id="snd" title="صدا" aria-label="صدا"></button>
     <button id="fs" title="تمام‌صفحه" aria-label="تمام‌صفحه"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
     __DASH_OPEN__<a href="/dashboard" title="داشبورد" aria-label="داشبورد"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg></a>__DASH_CLOSE__
   </div>
-</div>
+</header>
 
 <main class="stage idle" id="stage">
   <div class="card" id="card">
-    <div class="icon" id="icon"></div>
+    <div class="ring" id="icon"></div>
+    <span class="badge">اشتراک تعلیق شده است</span>
     <p class="title" id="title">کارت خود را نزدیک دستگاه کنید</p>
     <div class="name" id="name"></div>
     <div class="sub" id="sub"></div>
-    <div class="bar" id="bar"></div>
+    <div class="bar"><i></i></div>
   </div>
 </main>
 
-<div class="recent" id="recent"></div>
-<div class="banner" id="audioBanner">🔇 برای فعال شدن صدا، یک بار روی صفحه بزنید</div>
-<div class="banner err" id="errBanner"></div>
+<footer class="recent"><span>ترددهای اخیر</span><div class="chips" id="recent"></div></footer>
+<div class="banner" id="audioBanner">برای فعال شدن صدا، یک بار روی صفحه بزنید</div>
 
 <script>
 const FEED = __FEED__;
-const HOLD_MS = 6000;
+const KIOSK = __KIOSK__;
+const HOLD_MS = 5000;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const svg = (d, w = 2.2) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 
 const ICONS = {
-  idle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h4M7 14h7"/><path d="M17.5 3.5a6 6 0 0 1 3 3M16 1.5a9 9 0 0 1 6 6" opacity=".7"/></svg>',
-  ok:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
-  bad:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>',
-  info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h5v16h-5"/><path d="M10 8l4 4-4 4M14 12H4"/></svg>',
+  idle:     svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M6 16c.6-1.5 1.7-2 3-2s2.4.5 3 2M14 10h4M14 13h3"/>', 1.6),
+  ok:       svg('<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16.5 9.5"/>'),
+  out:      svg('<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 8l-4 4 4 4M6 12h10"/>'),
+  bad:      svg('<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>'),
+  blocked:  svg('<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>'),
+  expired:  svg('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M10 14l4 4M14 14l-4 4"/>'),
+  doorOff:  svg('<path d="M5 21V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v17M3 21h18M15 12h.01"/>'),
+  noMember: svg('<circle cx="10" cy="8" r="4"/><path d="M3 21c0-3.9 3.1-7 7-7 1.4 0 2.7.4 3.8 1.1M3 3l18 18"/>'),
+  info:     svg('<path d="M13 4h3a2 2 0 0 1 2 2v14M2 20h3M13 20h9"/><path d="M13 4.6v16.2L5 19V5.6l8-1z"/><path d="M10 12v.01"/>'),
+  wifi:     svg('<path d="M2 8.8a15 15 0 0 1 20 0M5 12.6a10 10 0 0 1 14 0M8.5 16.3a5 5 0 0 1 7 0M12 20h.01"/>'),
+  card:     svg('<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>'),
 };
 const SPK_ON  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
 const SPK_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M16 9l5 6M21 9l-5 6"/></svg>';
 
-// What to show for each result
+// What to show for each result: same table as the Android overlay
 function describe(e) {
+  const denied = 'دسترسی رد شد';
   switch (e.result) {
     case 'granted':
-      return {kind:'ok', title: e.direction === 'out' ? 'خدانگهدار' : 'خوش آمدید', name: e.name,
-              sub: (e.direction === 'in' ? 'ورود ثبت شد' : e.direction === 'out' ? 'خروج ثبت شد' : 'دسترسی مجاز') + (e.class ? ' · ' + e.class : '')};
-    case 'unknown':  return {kind:'bad', title:'دسترسی رد شد', name:'کارت ناشناس', sub:`شناسه <span class="uid">${esc(e.uid)}</span>`, raw:true};
-    case 'disabled': return {kind:'bad', title:'دسترسی رد شد', name:e.name, sub:'این کارت مسدود است'};
-    case 'expired':  return {kind:'bad', title:'دسترسی رد شد', name:e.name, sub:'اعتبار این کارت به پایان رسیده است'};
-    case 'denied':   return {kind:'bad', title:'دسترسی رد شد', name:e.name || 'کارت', sub:'این در غیرفعال است'};
-    case 'not_member': return {kind:'bad', title:'دسترسی رد شد', name:e.name, sub: e.class ? `عضو کلاس «${esc(e.class)}» نیستید` : 'عضو این کلاس نیستید', raw:true};
-    case 'manual':   return {kind:'info', title:'در باز شد', name:e.name, sub:'باز کردن دستی'};
-    default:         return {kind:'bad', title:e.result, name:e.name, sub:''};
+      return {kind:'ok', icon: e.direction === 'out' ? 'out' : 'ok',
+              title: e.direction === 'out' ? 'خدانگهدار' : e.direction === 'in' ? 'خوش آمدید' : 'دسترسی مجاز', name: e.name,
+              sub: (e.direction === 'in' ? 'ورود ثبت شد' : e.direction === 'out' ? 'خروج ثبت شد' : '') + (e.class ? (e.direction ? ' · ' : '') + 'کلاس ' + e.class : '')};
+    case 'unknown':  return {kind:'bad', icon:'bad', title:denied, name:'کارت ناشناس', sub:`شناسه <span class="uid">${esc(e.uid)}</span> · برای ثبت به مدیر مراجعه کنید`, raw:true};
+    case 'disabled': return {kind:'bad', icon:'blocked', title:denied, name:e.name, sub:'این کارت مسدود است'};
+    case 'expired':  return {kind:'bad', icon:'expired', title:denied, name:e.name, sub:'اعتبار این کارت به پایان رسیده است'};
+    case 'denied':   return {kind:'bad', icon:'doorOff', title:denied, name:e.name || 'کارت', sub:'این در غیرفعال است'};
+    case 'not_member': return {kind:'bad', icon:'noMember', title:denied, name:e.name, sub: e.class ? `عضو کلاس «${esc(e.class)}» نیستید` : 'عضو این کلاس نیستید', raw:true};
+    case 'manual':   return {kind:'info', icon:'info', title:'در باز شد', name:e.name || 'باز کردن از پنل', sub:'باز کردن دستی'};
+    default:         return {kind:'bad', icon:'bad', title:denied, name:e.name, sub:''};
   }
 }
 
@@ -157,7 +201,7 @@ const SOUNDS = {
   bad:  t => { tone(185, t, .24, 'square', .10); tone(185, t + .3, .24, 'square', .10); tone(139, t + .6, .5, 'square', .10); }, // buzz
   info: t => { tone(587.3, t, .2); tone(740, t + .14, .35, 'sine', .16); },
 };
-function play(kind) { if (!muted && audioReady()) SOUNDS[kind](ctx.currentTime + 0.02); }
+function play(kind) { if (!muted && audioReady() && SOUNDS[kind]) SOUNDS[kind](ctx.currentTime + 0.02); }
 function updateAudioUi() {
   $('snd').innerHTML = muted ? SPK_OFF : SPK_ON;
   $('audioBanner').classList.toggle('show', !muted && !audioReady());
@@ -173,22 +217,27 @@ document.addEventListener('pointerdown', unlockAudio);
 document.addEventListener('keydown', unlockAudio);
 
 // ---- stage ----
-let holdTimer = null;
+let holdTimer = null, suspended = false;
+function render(kind, icon, title, name, sub, raw) {
+  $('stage').className = 'stage ' + kind;
+  $('icon').innerHTML = ICONS[icon];
+  $('title').textContent = title;
+  $('name').textContent = name || '';
+  if (raw) $('sub').innerHTML = sub || ''; else $('sub').textContent = sub || '';
+}
 function setIdle() {
-  const st = $('stage');
-  st.className = 'stage idle';
-  $('icon').innerHTML = ICONS.idle;
-  $('title').textContent = 'کارت خود را نزدیک دستگاه کنید';
-  $('name').textContent = ''; $('sub').textContent = '';
+  if (suspended) return showSuspended();
+  render('idle', 'idle', 'کارت خود را نزدیک دستگاه کنید', '', KIOSK ? 'کارت را پشت گوشی، روی محل NFC بگیرید' : '');
+}
+function showSuspended() {
+  render('warn suspended', 'card', 'کارت‌ها پذیرفته نمی‌شوند', '',
+         'اشتراک این سازمان فعال نیست. از مدیر سازمان بخواهید آن را در پنل SecureEntry فعال کند.');
 }
 function showEvent(e) {
+  if (suspended) return;
   const d = describe(e), st = $('stage'), card = $('card');
-  st.className = 'stage ' + d.kind;
-  $('icon').innerHTML = ICONS[d.kind];
-  $('title').textContent = d.title;
-  $('name').textContent = d.name || '';
-  if (d.raw) $('sub').innerHTML = d.sub; else $('sub').textContent = d.sub;
-  if (!FEED.includes('door=') && !__KIOSK__ && e.door) $('sub').append(' · ' + e.door);
+  render(d.kind, d.icon, d.title, d.name, d.sub, d.raw);
+  if (!FEED.includes('door=') && !KIOSK && e.door) $('sub').append(' · ' + e.door);
   card.classList.remove('pop'); void card.offsetWidth; card.classList.add('pop');
   st.style.setProperty('--hold', HOLD_MS + 'ms');
   st.classList.remove('run'); void st.offsetWidth; st.classList.add('run');
@@ -200,10 +249,33 @@ function addRecent(e) {
   const d = describe(e), el = document.createElement('div');
   el.className = 'chip ' + d.kind;
   el.innerHTML = `<b>${esc(e.result === 'unknown' ? 'کارت ناشناس' : (e.name || '—'))}</b>` +
-                 `<span>${esc(e.time)} · ${esc(d.kind === 'ok' ? d.sub : d.title)}</span>`;
+                 `<span>${esc(e.time)} · ${esc(d.kind === 'ok' ? (d.sub || d.title) : d.title)}</span>`;
   const box = $('recent');
   box.prepend(el);
   while (box.children.length > 10) box.lastChild.remove();
+}
+function setSuspended(on) {
+  if (on === suspended) return;
+  suspended = on;
+  document.body.classList.toggle('is-suspended', on);
+  clearTimeout(holdTimer);
+  setIdle();
+}
+
+// ---- connection state: offline only after 2 failed polls in a row ----
+let fails = 0;
+function setNet(problem) {
+  $('netPill').classList.toggle('show', Boolean(problem));
+  $('netText').textContent = problem || '';
+}
+function setDoorState(doors) {
+  const dot = $('dot'), state = $('doorState');
+  if (suspended) { dot.className = 'dot warn'; state.textContent = 'تعلیق'; return; }
+  if (!doors.length) { dot.className = 'dot'; state.textContent = ''; return; }
+  const online = doors.every(d => d.online);
+  dot.className = 'dot ' + (online ? 'on' : 'off');
+  state.textContent = online ? 'متصل' : (doors.length > 1 && doors.some(d => d.online) ? 'برخی درها قطع' : 'قطع');
+  dot.title = doors.map(d => d.name + (d.online ? ': متصل' : ': قطع')).join('\n');
 }
 
 // ---- polling ----
@@ -217,19 +289,21 @@ async function poll() {
     if (r.status === 401) { location.reload(); return; }
     if (!r.ok) throw new Error(r.status === 404 ? 'لینک نمایشگر نامعتبر است (کلید در عوض شده؟)' : 'خطای سرور ' + r.status);
     const j = await r.json();
+    if (j.org) setSuspended(!j.org.active);
     for (const e of j.events) {
       lastId = Math.max(lastId, e.id);
       addRecent(e);
       if (!first) showEvent(e);
     }
-    const online = j.doors.length > 0 && j.doors.every(d => d.online);
-    $('dot').className = 'dot ' + (j.doors.length ? (online ? 'on' : 'off') : '');
-    $('dot').title = j.doors.map(d => d.name + (d.online ? ': متصل' : ': قطع')).join('\n');
-    first = false;
-    $('errBanner').classList.remove('show');
+    setDoorState(j.doors);
+    first = false; fails = 0;
+    setNet('');
   } catch (err) {
-    $('errBanner').textContent = '⚠ ارتباط با سرور برقرار نیست' + (err.message && !err.message.startsWith('Failed') ? ' — ' + err.message : '');
-    $('errBanner').classList.add('show');
+    fails++;
+    if (fails >= 2 || (err.message && !err.message.startsWith('Failed'))) {
+      setNet('ارتباط با سرور برقرار نیست' + (err.message && !err.message.startsWith('Failed') ? ' — ' + err.message : ' · تلاش دوباره'));
+      $('dot').className = 'dot off'; $('doorState').textContent = 'قطع';
+    }
   }
   polling = false;
   pollTimer = setTimeout(poll, __POLL_MS__);
