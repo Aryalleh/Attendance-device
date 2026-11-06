@@ -223,7 +223,7 @@ async function liveEvents(c: Ctx, orgId: number, doorId: number) {
 
 function livePage(v: { kiosk: boolean; orgName: string; doors: Row[]; doorId: number; feedUrl: string; pollMs: number }) {
   const doorBlock = v.kiosk
-    ? `<span>${esc(v.doors[0].name)}</span>`
+    ? `<p>${esc(v.doors[0].name)}</p>`
     : `<select id="doorSel" aria-label="در">
         <option value="">همه درها</option>
         ${v.doors.map((d) => `<option value="${d.id}" ${d.id === v.doorId ? "selected" : ""}>${esc(d.name)}</option>`).join("")}

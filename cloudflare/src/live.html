@@ -7,131 +7,173 @@
 <link rel="preload" href="/static/fonts/Vazirmatn.woff2" as="font" type="font/woff2" crossorigin>
 <style>
 @font-face{font-family:"Vazirmatn";src:url("/static/fonts/Vazirmatn.woff2") format("woff2");font-weight:100 900;font-display:swap}
-/* SecureEntry kiosk tokens (see the Door Kiosk design handoff) */
-:root{--bg:#0f172a;--surface:#1e293b;--surface-2:#1e293b99;--line:#334155;--fg:#f8fafc;--mut:#94a3b8;--dim:#64748b;
-  --brand:#4f46e5;--brand-soft:#818cf8;
-  --ok:#22c55e;--ok-fg:#4ade80;--bad:#ef4444;--bad-fg:#f87171;--info:#6366f1;--info-fg:#a5b4fc;--warn:#f59e0b;--warn-fg:#fbbf24}
+/* SecureEntry kiosk, as designed in UX Pilot (SecureEntry - Kiosk_Idle / Kiosk_Granted / Kiosk_Granted_FA) */
+:root{--slate-900:#0f172a;--slate-800:#1e293b;--slate-700:#334155;--slate-500:#64748b;--slate-400:#94a3b8;--slate-50:#f8fafc;
+  --indigo-600:#4f46e5;--indigo-400:#818cf8;--indigo-100:#e0e7ff;
+  --green-500:#22c55e;--green-400:#4ade80;--red-500:#ef4444;--red-400:#f87171;--amber-500:#f59e0b;--amber-400:#fbbf24}
 *{box-sizing:border-box}
-html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--fg);font-family:"Vazirmatn",Tahoma,system-ui,sans-serif;
-  display:grid;grid-template-rows:auto 1fr auto;overflow:hidden;font-variant-numeric:tabular-nums}
+html,body{height:100%;margin:0}
+body{background:var(--slate-900);color:var(--slate-50);font-family:"Vazirmatn",Tahoma,system-ui,sans-serif;
+  display:flex;flex-direction:column;overflow:hidden;user-select:none;-webkit-user-select:none}
+h1,h2,p{margin:0}
 button,select{font:inherit;color:inherit}
-svg{display:block}
+.fa{display:inline-block;height:1em;width:auto;fill:currentColor;vertical-align:-.125em}
+.num{font-variant-numeric:tabular-nums}
 
 /* top bar */
-.top{display:flex;align-items:center;gap:16px 24px;padding:16px 32px;background:var(--surface-2);border-bottom:1px solid var(--line);flex-wrap:wrap}
-.brand{display:flex;align-items:center;gap:12px}
-.logo{width:40px;height:40px;border-radius:10px;background:var(--brand);display:grid;place-items:center;color:#fff;flex:none}
-.logo svg{width:20px;height:20px}
-.brand b{display:block;font-size:18px;line-height:1.2}
-.brand span{display:block;color:var(--mut);font-size:12px}
-.door{display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;background:var(--bg);border:1px solid var(--line)}
-.door>svg{width:18px;height:18px;color:var(--brand-soft)}
-.door>span:first-of-type,.door select{font-weight:700}
-.door select{background:transparent;border:0;padding:0 2px}
-.door select option{background:var(--surface)}
-.dot{width:10px;height:10px;border-radius:50%;background:var(--dim);flex:none}
-.dot.on{background:var(--ok)}.dot.off{background:var(--bad)}.dot.warn{background:var(--warn)}
-#doorState{color:var(--mut);font-size:14px}
-.pill{display:none;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;font-size:14px;font-weight:500;
-  background:#f59e0b26;border:1px solid #f59e0b99;color:#fcd34d}
-.pill.show{display:flex}
-.pill svg{width:16px;height:16px;flex:none}
-.clock{margin-inline-start:auto;text-align:end;line-height:1.25}
-.clock b{display:block;font-size:30px;letter-spacing:.5px;direction:ltr}
-.clock span{color:var(--mut);font-size:14px}
+.top{height:80px;flex:none;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 32px;
+  background:var(--slate-800);border-bottom:1px solid var(--slate-700)}
+.brand{display:flex;align-items:center;gap:16px;min-width:0}
+.logo{width:40px;height:40px;flex:none;border-radius:12px;background:var(--indigo-600);display:grid;place-items:center;color:#fff;font-size:20px}
+.brand h1{font-size:20px;font-weight:700;line-height:1.25;letter-spacing:-.01em;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brand p{font-size:12px;font-weight:500;color:var(--slate-400)}
+.brand select{background:transparent;border:0;padding:0;font-size:12px;font-weight:500;color:var(--slate-400);cursor:pointer}
+.brand select option{background:var(--slate-800);color:var(--slate-50)}
+.right{display:flex;align-items:center;gap:24px;flex:none}
+.pill{display:flex;align-items:center;gap:8px;padding:4px 12px;border-radius:999px;border:1px solid;
+  background:#22c55e26;color:var(--green-400);border-color:#22c55e4d}
+.pill i{width:8px;height:8px;border-radius:50%;background:var(--green-500)}
+.pill span{font-size:12px;font-weight:700;letter-spacing:.05em}
+.pill.off{background:#ef444426;color:var(--red-400);border-color:#ef44444d}.pill.off i{background:var(--red-500)}
+.pill.warn{background:#f59e0b26;color:var(--amber-400);border-color:#f59e0b4d}.pill.warn i{background:var(--amber-500)}
+.pill.none{background:#64748b26;color:var(--slate-400);border-color:#64748b4d}.pill.none i{background:var(--slate-500)}
+.clock{font-size:24px;font-weight:700;color:#fff;direction:ltr}
 .tools{display:flex;gap:8px}
-.tools button,.tools a{background:var(--surface);border:1px solid var(--line);border-radius:10px;width:42px;height:42px;
-  display:grid;place-items:center;cursor:pointer;text-decoration:none;color:var(--fg)}
-.tools svg{width:20px;height:20px}
+.tools button,.tools a{width:40px;height:40px;border-radius:12px;background:var(--slate-900);border:1px solid var(--slate-700);
+  display:grid;place-items:center;cursor:pointer;color:var(--slate-400);text-decoration:none;font-size:16px}
+body.kiosk .tools{display:none}
 
 /* stage */
-.stage{display:grid;place-items:center;padding:24px 32px;transition:background .35s ease}
-.stage.ok{background:radial-gradient(circle at 50% 40%,#22c55e2e,transparent 60%)}
-.stage.bad{background:radial-gradient(circle at 50% 40%,#ef44442e,transparent 60%)}
-.stage.info{background:radial-gradient(circle at 50% 40%,#6366f138,transparent 60%)}
-.stage.warn{background:radial-gradient(circle at 50% 40%,#f59e0b29,transparent 60%)}
-.card{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;max-width:960px}
-.ring{position:relative;width:min(26vh,192px);height:min(26vh,192px);margin-bottom:8px;border-radius:50%;display:grid;place-items:center;
-  border:4px solid #6366f199;background:#6366f11a;color:var(--brand-soft)}
-.ring svg{width:46%;height:46%}
-.idle .ring::after{content:"";position:absolute;inset:-14%;border-radius:50%;border:2px solid #6366f14d;animation:pulse 2.4s ease-in-out infinite}
-.ok .ring{border-color:var(--ok);background:#22c55e26;color:var(--ok-fg)}
-.bad .ring{border-color:var(--bad);background:#ef444426;color:var(--bad-fg)}
-.info .ring{border-color:var(--info);background:#6366f126;color:var(--info-fg)}
-.warn .ring{border-color:var(--warn);background:#f59e0b26;color:var(--warn-fg)}
-@keyframes pulse{0%,100%{transform:scale(.94);opacity:.5}50%{transform:scale(1);opacity:1}}
-.pop{animation:pop .45s cubic-bezier(.2,1.4,.4,1)}
-@keyframes pop{from{transform:scale(.85);opacity:0}to{transform:scale(1);opacity:1}}
-.title{font-size:clamp(22px,4.5vh,36px);font-weight:700;margin:0;color:#cbd5e1}
-.ok .title{color:var(--ok-fg)}.bad .title{color:var(--bad-fg)}.info .title{color:var(--info-fg)}.warn .title{color:var(--warn-fg)}
-.name{font-size:clamp(40px,11vh,88px);font-weight:900;line-height:1.2;color:#fff;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.name:empty,.sub:empty{display:none}
-.sub{font-size:clamp(17px,3vh,24px);color:var(--mut)}
-.uid{font-family:ui-monospace,Consolas,monospace;direction:ltr;unicode-bidi:isolate;color:#cbd5e1}
-.bar{height:4px;width:224px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:8px}
-.bar i{display:block;height:100%;width:100%;background:currentColor;opacity:.75;transform-origin:right}
-.idle .bar,.warn .bar,.suspended .bar{display:none}
-.run .bar i{animation:shrink var(--hold) linear forwards}
-.ok .bar{color:var(--ok)}.bad .bar{color:var(--bad)}.info .bar{color:var(--info)}
-@keyframes shrink{from{transform:scaleX(1)}to{transform:scaleX(0)}}
-.badge{display:none;padding:6px 16px;border-radius:999px;background:#f59e0b26;color:#fcd34d;font-size:14px;font-weight:700}
-.suspended .badge{display:block}
+.stage{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px}
+.stage .pill{display:none}
+.ringwrap{position:relative;width:320px;height:320px;display:flex;align-items:center;justify-content:center}
+.pulse{position:absolute;inset:0;border:4px solid #4f46e54d;border-radius:50%;animation:pulse 2.4s infinite cubic-bezier(.4,0,.6,1)}
+@keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.05);opacity:.8}}
+.ring{width:256px;height:256px;border:8px solid var(--indigo-600);border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:#0f172a80;color:var(--indigo-400);font-size:72px}
+.idle-text{margin-top:48px}
+.idle-text h2{font-size:36px;font-weight:800;color:#fff;margin-bottom:16px}
+.idle-text p{font-size:20px;color:var(--slate-400)}
+.idle-text small{display:block;font-size:14px;font-weight:500;color:var(--slate-500);margin-top:24px}
+.result{display:none;flex-direction:column;align-items:center}
+.result .ring{margin-bottom:48px;font-size:96px}
+.result .title{font-size:36px;font-weight:700;margin-bottom:8px;letter-spacing:.025em}
+.result .name{font-size:88px;font-weight:900;color:#fff;line-height:1.2;margin-bottom:16px;max-width:92vw;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;padding-bottom:.08em}
+.result .sub{font-size:24px;color:var(--slate-400)}
+.uid{font-family:ui-monospace,Consolas,monospace;direction:ltr;unicode-bidi:isolate}
+.holdbar{margin-top:64px;width:384px;max-width:80vw;height:6px;background:var(--slate-800);border-radius:999px;overflow:hidden}
+.holdbar i{display:block;height:100%;width:100%}
+.stage.showing .ringwrap,.stage.showing .idle-text{display:none}
+.stage.showing .result{display:flex}
+.pop{animation:pop .45s cubic-bezier(.175,.885,.32,1.275)}
+@keyframes pop{from{transform:scale(.8);opacity:0}to{transform:scale(1);opacity:1}}
+.run .holdbar i{animation:shrink var(--hold) linear forwards}
+@keyframes shrink{from{width:100%}to{width:0}}
+.k-ok .ring{border-color:var(--green-500);background:#22c55e1a;color:var(--green-500)}.k-ok .title{color:var(--green-400)}.k-ok .holdbar i{background:var(--green-500)}
+.k-bad .ring{border-color:var(--red-500);background:#ef44441a;color:var(--red-500)}.k-bad .title{color:var(--red-400)}.k-bad .holdbar i{background:var(--red-500)}
+.k-info .ring{border-color:var(--indigo-600);background:#4f46e51a;color:var(--indigo-400)}.k-info .title{color:var(--indigo-400)}.k-info .holdbar i{background:var(--indigo-600)}
+.k-warn .ring{border-color:var(--amber-500);background:#f59e0b1a;color:var(--amber-500)}.k-warn .title{color:var(--amber-400)}.k-warn .holdbar{display:none}
 
-/* recent strip */
-.recent{display:flex;flex-direction:column;gap:12px;padding:16px 32px 20px;border-top:1px solid var(--line);background:var(--bg)}
-.recent>span{color:var(--dim);font-size:12px;font-weight:700;letter-spacing:.1em}
-.chips{display:flex;gap:12px;overflow-x:auto;min-height:62px}
-.chips:empty::before{content:"هنوز ترددی ثبت نشده است";color:var(--mut);align-self:center}
-.chip{flex:0 0 auto;display:flex;flex-direction:column;gap:2px;background:var(--surface);border:1px solid var(--line);
-  border-inline-start:4px solid var(--dim);border-radius:12px;padding:10px 16px;min-width:180px}
-.chip.ok{border-inline-start-color:var(--ok)}.chip.bad{border-inline-start-color:var(--bad)}.chip.info{border-inline-start-color:var(--info)}
-.chip b{font-size:15px;white-space:nowrap}
-.chip span{color:var(--mut);font-size:13px;white-space:nowrap}
+/* recent scans */
+.recent{height:100px;flex:none;display:flex;align-items:center;padding:0 24px;background:var(--slate-800);border-top:1px solid var(--slate-700);overflow:hidden}
+.recent>span{font-size:10px;font-weight:700;color:var(--slate-500);letter-spacing:.1em;margin-inline-end:24px;flex:none}
+.chips{display:flex;gap:12px;overflow-x:auto;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chips:empty::before{content:"هنوز ترددی ثبت نشده است";font-size:12px;color:var(--slate-500)}
+.chip{position:relative;overflow:hidden;flex:none;display:flex;align-items:center;height:56px;min-width:200px;padding:0 12px;
+  background:var(--slate-900);border:1px solid var(--slate-700);border-radius:12px}
+.chip::before{content:"";position:absolute;inset-block:0;inset-inline-start:0;width:4px;background:var(--green-500)}
+.chip.bad::before{background:var(--red-500)}.chip.info::before{background:var(--indigo-600)}
+.chip .av{width:32px;height:32px;flex:none;border-radius:50%;background:var(--slate-800);display:grid;place-items:center;
+  margin-inline-end:12px;font-size:12px;color:var(--slate-400)}
+.chip.bad .av{color:var(--red-500)}
+.chip b{display:block;font-size:12px;font-weight:700;color:#fff;line-height:1.25;white-space:nowrap}
+.chip small{display:block;font-size:10px;color:var(--slate-400);white-space:nowrap}
+.chip.dim{opacity:.5}
+.chip.active{background:var(--indigo-600);border-color:var(--indigo-400);opacity:1}
+.chip.active::before{background:#fff}
+.chip.active .av{background:#fff3;color:#fff}
+.chip.active small{color:var(--indigo-100)}
 body.is-suspended .recent{display:none}
 
-/* sound hint */
-.banner{position:fixed;inset-inline:0;bottom:120px;margin:auto;width:fit-content;max-width:92vw;background:var(--surface);
-  border:1px solid var(--line);border-radius:12px;padding:10px 18px;font-size:15px;display:none;cursor:pointer}
+.banner{position:fixed;inset-inline:0;bottom:116px;margin:auto;width:fit-content;max-width:92vw;background:var(--slate-800);
+  border:1px solid var(--slate-700);border-radius:12px;padding:10px 18px;font-size:14px;display:none;cursor:pointer}
 .banner.show{display:block}
-@media (prefers-reduced-motion:reduce){.idle .ring::after,.pop{animation:none}}
-@media (max-width:700px){.top{padding:12px 16px;gap:10px 14px}.brand span{display:none}.clock b{font-size:22px}
-  .recent{padding:12px 16px}.stage{padding:16px}.tools button,.tools a{width:38px;height:38px}}
+
+/* phone (SecureEntry - Kiosk_Idle / Kiosk_Granted, 375 px) */
+@media (max-width:600px){
+  .top{height:64px;padding:0 16px}
+  .brand{gap:12px}
+  .logo{width:32px;height:32px;border-radius:8px;font-size:14px}
+  .brand h1{font-size:14px}
+  .brand p,.brand select{display:none}
+  .right .pill,.tools{display:none}
+  .clock{font-size:18px}
+  .stage .pill{display:flex;margin-bottom:32px;padding:4px 12px}
+  .stage .pill i{width:6px;height:6px}
+  .stage .pill span{font-size:10px}
+  .stage.showing .pill{display:none}
+  .ringwrap{width:256px;height:256px;margin-bottom:0}
+  .ringwrap .ring{width:192px;height:192px;font-size:60px}
+  .idle-text{margin-top:48px}
+  .idle-text h2{font-size:30px}
+  .idle-text p{font-size:18px}
+  .idle-text small{font-size:12px}
+  .result .ring{width:192px;height:192px;font-size:72px;margin-bottom:32px}
+  .result .title{font-size:24px}
+  .result .name{font-size:48px;margin-bottom:16px}
+  .result .sub{font-size:18px}
+  .holdbar{margin-top:40px;width:256px}
+  .recent{height:120px;flex-direction:column;align-items:stretch;justify-content:center;padding:0 16px}
+  .recent>span{font-size:9px;margin:0 0 12px}
+  .chip{height:48px;min-width:160px}
+  .chip .av{width:28px;height:28px;font-size:10px;margin-inline-end:8px}
+  .chip b{font-size:10px}
+  .chip small{font-size:8px}
+  .banner{bottom:136px}
+}
+@media (prefers-reduced-motion:reduce){.pulse,.pop{animation:none}}
 </style>
 </head>
 <body>
 <header class="top">
   <div class="brand">
-    <div class="logo"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l8 3v6c0 5-3.4 9.3-8 11-4.6-1.7-8-6-8-11V5l8-3zm0 2.2L6 6.4V11c0 3.9 2.5 7.4 6 8.9V4.2z"/></svg></div>
-    <div><b>SecureEntry</b><span>__ORG_NAME__</span></div>
+    <div class="logo" data-fa="shield-halved"></div>
+    <div><h1>__ORG_NAME__</h1>__DOOR_BLOCK__</div>
   </div>
-  <div class="door">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 4h3a2 2 0 0 1 2 2v14M2 20h3M13 20h9M10 12v.01"/><path d="M13 4.6v16.2L5 19V5.6l8-1z"/></svg>
-    __DOOR_BLOCK__
-    <span class="dot" id="dot"></span><span id="doorState"></span>
-  </div>
-  <div class="pill" id="netPill"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 1 21h22L12 2zm1 15h-2v2h2v-2zm0-7h-2v5h2v-5z"/></svg><span id="netText"></span></div>
-  <div class="clock"><b id="time">--:--:--</b><span id="date"></span></div>
-  <div class="tools">
-    <button id="snd" title="صدا" aria-label="صدا"></button>
-    <button id="fs" title="تمام‌صفحه" aria-label="تمام‌صفحه"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
-    __DASH_OPEN__<a href="/dashboard" title="داشبورد" aria-label="داشبورد"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg></a>__DASH_CLOSE__
+  <div class="right">
+    <div class="pill none" id="pill"><i></i><span id="pillText"></span></div>
+    <div class="clock num" id="clock">--:--:--</div>
+    <div class="tools">
+      <button id="snd" title="صدا" aria-label="صدا"></button>
+      <button id="fs" title="تمام‌صفحه" aria-label="تمام‌صفحه" data-fa="expand"></button>
+      __DASH_OPEN__<a href="/dashboard" title="داشبورد" aria-label="داشبورد" data-fa="chart-line"></a>__DASH_CLOSE__
+    </div>
   </div>
 </header>
 
-<main class="stage idle" id="stage">
-  <div class="card" id="card">
+<main class="stage" id="stage">
+  <div class="pill none" id="pill2"><i></i><span id="pillText2"></span></div>
+  <div class="ringwrap">
+    <div class="pulse"></div>
+    <div class="ring" data-fa="id-card"></div>
+  </div>
+  <div class="idle-text">
+    <h2>آماده برای اسکن</h2>
+    <p>کارت خود را نزدیک دستگاه کنید</p>
+    <small id="nfcHint">کارت را پشت گوشی، روی محل NFC بگیرید</small>
+  </div>
+  <div class="result" id="result">
     <div class="ring" id="icon"></div>
-    <span class="badge">اشتراک تعلیق شده است</span>
-    <p class="title" id="title">کارت خود را نزدیک دستگاه کنید</p>
-    <div class="name" id="name"></div>
-    <div class="sub" id="sub"></div>
-    <div class="bar"><i></i></div>
+    <p class="title" id="title"></p>
+    <h2 class="name" id="name"></h2>
+    <p class="sub" id="sub"></p>
+    <div class="holdbar"><i></i></div>
   </div>
 </main>
 
-<footer class="recent"><span>ترددهای اخیر</span><div class="chips" id="recent"></div></footer>
+<footer class="recent"><span>آخرین ترددها</span><div class="chips" id="recent"></div></footer>
 <div class="banner" id="audioBanner">برای فعال شدن صدا، یک بار روی صفحه بزنید</div>
 
 <script>
@@ -140,39 +182,49 @@ const KIOSK = __KIOSK__;
 const HOLD_MS = 5000;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const svg = (d, w = 2.2) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 
-const ICONS = {
-  idle:     svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M6 16c.6-1.5 1.7-2 3-2s2.4.5 3 2M14 10h4M14 13h3"/>', 1.6),
-  ok:       svg('<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16.5 9.5"/>'),
-  out:      svg('<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 8l-4 4 4 4M6 12h10"/>'),
-  bad:      svg('<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>'),
-  blocked:  svg('<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>'),
-  expired:  svg('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M10 14l4 4M14 14l-4 4"/>'),
-  doorOff:  svg('<path d="M5 21V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v17M3 21h18M15 12h.01"/>'),
-  noMember: svg('<circle cx="10" cy="8" r="4"/><path d="M3 21c0-3.9 3.1-7 7-7 1.4 0 2.7.4 3.8 1.1M3 3l18 18"/>'),
-  info:     svg('<path d="M13 4h3a2 2 0 0 1 2 2v14M2 20h3M13 20h9"/><path d="M13 4.6v16.2L5 19V5.6l8-1z"/><path d="M10 12v.01"/>'),
-  wifi:     svg('<path d="M2 8.8a15 15 0 0 1 20 0M5 12.6a10 10 0 0 1 14 0M8.5 16.3a5 5 0 0 1 7 0M12 20h.01"/>'),
-  card:     svg('<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>'),
+// Font Awesome Free 6.4.0 solid icons (CC BY 4.0, https://fontawesome.com/license/free), inlined so the door screen needs no CDN
+const FA = {
+  "arrow-right-from-bracket": ["0 0 512 512", "M502.6 278.6c12.5-12.5 12.5-32.8 0-45.3l-128-128c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3L402.7 224 192 224c-17.7 0-32 14.3-32 32s14.3 32 32 32l210.7 0-73.4 73.4c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0l128-128zM160 96c17.7 0 32-14.3 32-32s-14.3-32-32-32L96 32C43 32 0 75 0 128L0 384c0 53 43 96 96 96l64 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-64 0c-17.7 0-32-14.3-32-32l0-256c0-17.7 14.3-32 32-32l64 0z"],
+  "ban": ["0 0 512 512", "M367.2 412.5L99.5 144.8C77.1 176.1 64 214.5 64 256c0 106 86 192 192 192c41.5 0 79.9-13.1 111.2-35.5zm45.3-45.3C434.9 335.9 448 297.5 448 256c0-106-86-192-192-192c-41.5 0-79.9 13.1-111.2 35.5L412.5 367.2zM0 256a256 256 0 1 1 512 0A256 256 0 1 1 0 256z"],
+  "calendar-xmark": ["0 0 512 512", "M160 0c17.7 0 32 14.3 32 32V64H320V32c0-17.7 14.3-32 32-32s32 14.3 32 32V64h48c26.5 0 48 21.5 48 48v48H32V112c0-26.5 21.5-48 48-48h48V32c0-17.7 14.3-32 32-32zM32 192H480V464c0 26.5-21.5 48-48 48H80c-26.5 0-48-21.5-48-48V192zM337 305c9.4-9.4 9.4-24.6 0-33.9s-24.6-9.4-33.9 0l-47 47-47-47c-9.4-9.4-24.6-9.4-33.9 0s-9.4 24.6 0 33.9l47 47-47 47c-9.4 9.4-9.4 24.6 0 33.9s24.6 9.4 33.9 0l47-47 47 47c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-47-47 47-47z"],
+  "chart-line": ["0 0 512 512", "M64 64c0-17.7-14.3-32-32-32S0 46.3 0 64V400c0 44.2 35.8 80 80 80H480c17.7 0 32-14.3 32-32s-14.3-32-32-32H80c-8.8 0-16-7.2-16-16V64zm406.6 86.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L320 210.7l-57.4-57.4c-12.5-12.5-32.8-12.5-45.3 0l-112 112c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0L240 221.3l57.4 57.4c12.5 12.5 32.8 12.5 45.3 0l128-128z"],
+  "circle-check": ["0 0 512 512", "M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM369 209L241 337c-9.4 9.4-24.6 9.4-33.9 0l-64-64c-9.4-9.4-9.4-24.6 0-33.9s24.6-9.4 33.9 0l47 47L335 175c9.4-9.4 24.6-9.4 33.9 0s9.4 24.6 0 33.9z"],
+  "circle-xmark": ["0 0 512 512", "M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM175 175c9.4-9.4 24.6-9.4 33.9 0l47 47 47-47c9.4-9.4 24.6-9.4 33.9 0s9.4 24.6 0 33.9l-47 47 47 47c9.4 9.4 9.4 24.6 0 33.9s-24.6 9.4-33.9 0l-47-47-47 47c-9.4 9.4-24.6 9.4-33.9 0s-9.4-24.6 0-33.9l47-47-47-47c-9.4-9.4-9.4-24.6 0-33.9z"],
+  "credit-card": ["0 0 576 512", "M64 32C28.7 32 0 60.7 0 96v32H576V96c0-35.3-28.7-64-64-64H64zM576 224H0V416c0 35.3 28.7 64 64 64H512c35.3 0 64-28.7 64-64V224zM112 352h64c8.8 0 16 7.2 16 16s-7.2 16-16 16H112c-8.8 0-16-7.2-16-16s7.2-16 16-16zm112 16c0-8.8 7.2-16 16-16H368c8.8 0 16 7.2 16 16s-7.2 16-16 16H240c-8.8 0-16-7.2-16-16z"],
+  "door-closed": ["0 0 576 512", "M96 64c0-35.3 28.7-64 64-64H416c35.3 0 64 28.7 64 64V448h64c17.7 0 32 14.3 32 32s-14.3 32-32 32H432 144 32c-17.7 0-32-14.3-32-32s14.3-32 32-32H96V64zM384 288a32 32 0 1 0 0-64 32 32 0 1 0 0 64z"],
+  "door-open": ["0 0 576 512", "M320 32c0-9.9-4.5-19.2-12.3-25.2S289.8-1.4 280.2 1l-179.9 45C79 51.3 64 70.5 64 92.5V448H32c-17.7 0-32 14.3-32 32s14.3 32 32 32H96 288h32V480 32zM256 256c0 17.7-10.7 32-24 32s-24-14.3-24-32s10.7-32 24-32s24 14.3 24 32zm96-128h96V480c0 17.7 14.3 32 32 32h64c17.7 0 32-14.3 32-32s-14.3-32-32-32H512V128c0-35.3-28.7-64-64-64H352v64z"],
+  "expand": ["0 0 448 512", "M32 32C14.3 32 0 46.3 0 64v96c0 17.7 14.3 32 32 32s32-14.3 32-32V96h64c17.7 0 32-14.3 32-32s-14.3-32-32-32H32zM64 352c0-17.7-14.3-32-32-32s-32 14.3-32 32v96c0 17.7 14.3 32 32 32h96c17.7 0 32-14.3 32-32s-14.3-32-32-32H64V352zM320 32c-17.7 0-32 14.3-32 32s14.3 32 32 32h64v64c0 17.7 14.3 32 32 32s32-14.3 32-32V64c0-17.7-14.3-32-32-32H320zM448 352c0-17.7-14.3-32-32-32s-32 14.3-32 32v64H320c-17.7 0-32 14.3-32 32s14.3 32 32 32h96c17.7 0 32-14.3 32-32V352z"],
+  "id-card": ["0 0 576 512", "M0 96l576 0c0-35.3-28.7-64-64-64H64C28.7 32 0 60.7 0 96zm0 32V416c0 35.3 28.7 64 64 64H512c35.3 0 64-28.7 64-64V128H0zM64 405.3c0-29.5 23.9-53.3 53.3-53.3H234.7c29.5 0 53.3 23.9 53.3 53.3c0 5.9-4.8 10.7-10.7 10.7H74.7c-5.9 0-10.7-4.8-10.7-10.7zM176 192a64 64 0 1 1 0 128 64 64 0 1 1 0-128zm176 16c0-8.8 7.2-16 16-16H496c8.8 0 16 7.2 16 16s-7.2 16-16 16H368c-8.8 0-16-7.2-16-16zm0 64c0-8.8 7.2-16 16-16H496c8.8 0 16 7.2 16 16s-7.2 16-16 16H368c-8.8 0-16-7.2-16-16zm0 64c0-8.8 7.2-16 16-16H496c8.8 0 16 7.2 16 16s-7.2 16-16 16H368c-8.8 0-16-7.2-16-16z"],
+  "shield-halved": ["0 0 512 512", "M256 0c4.6 0 9.2 1 13.4 2.9L457.7 82.8c22 9.3 38.4 31 38.3 57.2c-.5 99.2-41.3 280.7-213.6 363.2c-16.7 8-36.1 8-52.8 0C57.3 420.7 16.5 239.2 16 140c-.1-26.2 16.3-47.9 38.3-57.2L242.7 2.9C246.8 1 251.4 0 256 0zm0 66.8V444.8C394 378 431.1 230.1 432 141.4L256 66.8l0 0z"],
+  "triangle-exclamation": ["0 0 512 512", "M256 32c14.2 0 27.3 7.5 34.5 19.8l216 368c7.3 12.4 7.3 27.7 .2 40.1S486.3 480 472 480H40c-14.3 0-27.6-7.7-34.7-20.1s-7-27.8 .2-40.1l216-368C228.7 39.5 241.8 32 256 32zm0 128c-13.3 0-24 10.7-24 24V296c0 13.3 10.7 24 24 24s24-10.7 24-24V184c0-13.3-10.7-24-24-24zm32 224a32 32 0 1 0 -64 0 32 32 0 1 0 64 0z"],
+  "user": ["0 0 448 512", "M224 256A128 128 0 1 0 224 0a128 128 0 1 0 0 256zm-45.7 48C79.8 304 0 383.8 0 482.3C0 498.7 13.3 512 29.7 512H418.3c16.4 0 29.7-13.3 29.7-29.7C448 383.8 368.2 304 269.7 304H178.3z"],
+  "user-slash": ["0 0 640 512", "M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L353.3 251.6C407.9 237 448 187.2 448 128C448 57.3 390.7 0 320 0C250.2 0 193.5 55.8 192 125.2L38.8 5.1zM264.3 304.3C170.5 309.4 96 387.2 96 482.3c0 16.4 13.3 29.7 29.7 29.7H514.3c3.9 0 7.6-.7 11-2.1l-261-205.6z"],
+  "volume-high": ["0 0 640 512", "M533.6 32.5C598.5 85.3 640 165.8 640 256s-41.5 170.8-106.4 223.5c-10.3 8.4-25.4 6.8-33.8-3.5s-6.8-25.4 3.5-33.8C557.5 398.2 592 331.2 592 256s-34.5-142.2-88.7-186.3c-10.3-8.4-11.8-23.5-3.5-33.8s23.5-11.8 33.8-3.5zM473.1 107c43.2 35.2 70.9 88.9 70.9 149s-27.7 113.8-70.9 149c-10.3 8.4-25.4 6.8-33.8-3.5s-6.8-25.4 3.5-33.8C475.3 341.3 496 301.1 496 256s-20.7-85.3-53.2-111.8c-10.3-8.4-11.8-23.5-3.5-33.8s23.5-11.8 33.8-3.5zm-60.5 74.5C434.1 199.1 448 225.9 448 256s-13.9 56.9-35.4 74.5c-10.3 8.4-25.4 6.8-33.8-3.5s-6.8-25.4 3.5-33.8C393.1 284.4 400 271 400 256s-6.9-28.4-17.7-37.3c-10.3-8.4-11.8-23.5-3.5-33.8s23.5-11.8 33.8-3.5zM301.1 34.8C312.6 40 320 51.4 320 64V448c0 12.6-7.4 24-18.9 29.2s-25 3.1-34.4-5.3L131.8 352H64c-35.3 0-64-28.7-64-64V224c0-35.3 28.7-64 64-64h67.8L266.7 40.1c9.4-8.4 22.9-10.4 34.4-5.3z"],
+  "volume-xmark": ["0 0 576 512", "M301.1 34.8C312.6 40 320 51.4 320 64V448c0 12.6-7.4 24-18.9 29.2s-25 3.1-34.4-5.3L131.8 352H64c-35.3 0-64-28.7-64-64V224c0-35.3 28.7-64 64-64h67.8L266.7 40.1c9.4-8.4 22.9-10.4 34.4-5.3zM425 167l55 55 55-55c9.4-9.4 24.6-9.4 33.9 0s9.4 24.6 0 33.9l-55 55 55 55c9.4 9.4 9.4 24.6 0 33.9s-24.6 9.4-33.9 0l-55-55-55 55c-9.4 9.4-24.6 9.4-33.9 0s-9.4-24.6 0-33.9l55-55-55-55c-9.4-9.4-9.4-24.6 0-33.9s24.6-9.4 33.9 0z"],
+  "wifi": ["0 0 640 512", "M54.2 202.9C123.2 136.7 216.8 96 320 96s196.8 40.7 265.8 106.9c12.8 12.2 33 11.8 45.2-.9s11.8-33-.9-45.2C549.7 79.5 440.4 32 320 32S90.3 79.5 9.8 156.7C-2.9 169-3.3 189.2 8.9 202s32.5 13.2 45.2 .9zM320 256c56.8 0 108.6 21.1 148.2 56c13.3 11.7 33.5 10.4 45.2-2.8s10.4-33.5-2.8-45.2C459.8 219.2 393 192 320 192s-139.8 27.2-190.5 72c-13.3 11.7-14.5 31.9-2.8 45.2s31.9 14.5 45.2 2.8c39.5-34.9 91.3-56 148.2-56zm64 160a64 64 0 1 0 -128 0 64 64 0 1 0 128 0z"]
 };
-const SPK_ON  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
-const SPK_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M16 9l5 6M21 9l-5 6"/></svg>';
+const fa = n => `<svg class="fa" viewBox="${FA[n][0]}" aria-hidden="true"><path d="${FA[n][1]}"/></svg>`;
+document.querySelectorAll('[data-fa]').forEach(el => { el.innerHTML = fa(el.dataset.fa); });
+if (KIOSK) document.body.classList.add('kiosk'); else $('nfcHint').remove();
 
 // What to show for each result: same table as the Android overlay
 function describe(e) {
   const denied = 'دسترسی رد شد';
   switch (e.result) {
-    case 'granted':
-      return {kind:'ok', icon: e.direction === 'out' ? 'out' : 'ok',
+    case 'granted': {
+      const dir = e.direction === 'in' ? 'ورود' : e.direction === 'out' ? 'خروج' : '';
+      return {kind:'ok', icon: e.direction === 'out' ? 'arrow-right-from-bracket' : 'circle-check',
               title: e.direction === 'out' ? 'خدانگهدار' : e.direction === 'in' ? 'خوش آمدید' : 'دسترسی مجاز', name: e.name,
-              sub: (e.direction === 'in' ? 'ورود ثبت شد' : e.direction === 'out' ? 'خروج ثبت شد' : '') + (e.class ? (e.direction ? ' · ' : '') + 'کلاس ' + e.class : '')};
-    case 'unknown':  return {kind:'bad', icon:'bad', title:denied, name:'کارت ناشناس', sub:`شناسه <span class="uid">${esc(e.uid)}</span> · برای ثبت به مدیر مراجعه کنید`, raw:true};
-    case 'disabled': return {kind:'bad', icon:'blocked', title:denied, name:e.name, sub:'این کارت مسدود است'};
-    case 'expired':  return {kind:'bad', icon:'expired', title:denied, name:e.name, sub:'اعتبار این کارت به پایان رسیده است'};
-    case 'denied':   return {kind:'bad', icon:'doorOff', title:denied, name:e.name || 'کارت', sub:'این در غیرفعال است'};
-    case 'not_member': return {kind:'bad', icon:'noMember', title:denied, name:e.name, sub: e.class ? `عضو کلاس «${esc(e.class)}» نیستید` : 'عضو این کلاس نیستید', raw:true};
-    case 'manual':   return {kind:'info', icon:'info', title:'در باز شد', name:e.name || 'باز کردن از پنل', sub:'باز کردن دستی'};
-    default:         return {kind:'bad', icon:'bad', title:denied, name:e.name, sub:''};
+              sub: [dir ? dir + ' ثبت شد' : '', e.class].filter(Boolean).join(' • '), chip: dir || 'مجاز'};
+    }
+    case 'unknown':  return {kind:'bad', icon:'circle-xmark', title:denied, name:'کارت ناشناس', sub:`شناسه <span class="uid">${esc(e.uid)}</span> • برای ثبت به مدیر مراجعه کنید`, raw:true};
+    case 'disabled': return {kind:'bad', icon:'ban', title:denied, name:e.name, sub:'این کارت مسدود است'};
+    case 'expired':  return {kind:'bad', icon:'calendar-xmark', title:denied, name:e.name, sub:'اعتبار این کارت به پایان رسیده است'};
+    case 'denied':   return {kind:'bad', icon:'door-closed', title:denied, name:e.name || 'کارت', sub:'این در غیرفعال است'};
+    case 'not_member': return {kind:'bad', icon:'user-slash', title:denied, name:e.name, sub: e.class ? `عضو کلاس «${esc(e.class)}» نیستید` : 'عضو این کلاس نیستید', raw:true};
+    case 'manual':   return {kind:'info', icon:'door-open', title:'در باز شد', name:e.name || 'باز کردن از پنل', sub:'باز کردن دستی', chip:'باز شدن دستی'};
+    default:         return {kind:'bad', icon:'circle-xmark', title:denied, name:e.name, sub:''};
   }
 }
 
@@ -203,7 +255,7 @@ const SOUNDS = {
 };
 function play(kind) { if (!muted && audioReady() && SOUNDS[kind]) SOUNDS[kind](ctx.currentTime + 0.02); }
 function updateAudioUi() {
-  $('snd').innerHTML = muted ? SPK_OFF : SPK_ON;
+  $('snd').innerHTML = fa(muted ? 'volume-xmark' : 'volume-high');
   $('audioBanner').classList.toggle('show', !muted && !audioReady());
 }
 $('snd').onclick = ev => {
@@ -219,28 +271,31 @@ document.addEventListener('keydown', unlockAudio);
 // ---- stage ----
 let holdTimer = null, suspended = false;
 function render(kind, icon, title, name, sub, raw) {
-  $('stage').className = 'stage ' + kind;
-  $('icon').innerHTML = ICONS[icon];
+  const st = $('stage');
+  st.className = 'stage showing k-' + kind;
+  $('icon').innerHTML = fa(icon);
   $('title').textContent = title;
   $('name').textContent = name || '';
   if (raw) $('sub').innerHTML = sub || ''; else $('sub').textContent = sub || '';
 }
 function setIdle() {
   if (suspended) return showSuspended();
-  render('idle', 'idle', 'کارت خود را نزدیک دستگاه کنید', '', KIOSK ? 'کارت را پشت گوشی، روی محل NFC بگیرید' : '');
+  $('stage').className = 'stage';
+  markChips(false);
 }
 function showSuspended() {
-  render('warn suspended', 'card', 'کارت‌ها پذیرفته نمی‌شوند', '',
-         'اشتراک این سازمان فعال نیست. از مدیر سازمان بخواهید آن را در پنل SecureEntry فعال کند.');
+  render('warn', 'credit-card', 'اشتراک تعلیق شده است', 'کارت‌ها پذیرفته نمی‌شوند',
+         'از مدیر سازمان بخواهید اشتراک را در پنل SecureEntry فعال کند.');
 }
 function showEvent(e) {
   if (suspended) return;
-  const d = describe(e), st = $('stage'), card = $('card');
+  const d = describe(e), st = $('stage'), res = $('result');
   render(d.kind, d.icon, d.title, d.name, d.sub, d.raw);
-  if (!FEED.includes('door=') && !KIOSK && e.door) $('sub').append(' · ' + e.door);
-  card.classList.remove('pop'); void card.offsetWidth; card.classList.add('pop');
+  if (!FEED.includes('door=') && !KIOSK && e.door) $('sub').append(' • ' + e.door);
+  res.classList.remove('pop'); void res.offsetWidth; res.classList.add('pop');
   st.style.setProperty('--hold', HOLD_MS + 'ms');
   st.classList.remove('run'); void st.offsetWidth; st.classList.add('run');
+  markChips(true);
   play(d.kind);
   clearTimeout(holdTimer);
   holdTimer = setTimeout(setIdle, HOLD_MS);
@@ -248,11 +303,23 @@ function showEvent(e) {
 function addRecent(e) {
   const d = describe(e), el = document.createElement('div');
   el.className = 'chip ' + d.kind;
-  el.innerHTML = `<b>${esc(e.result === 'unknown' ? 'کارت ناشناس' : (e.name || '—'))}</b>` +
-                 `<span>${esc(e.time)} · ${esc(d.kind === 'ok' ? (d.sub || d.title) : d.title)}</span>`;
+  el.dataset.time = e.time;
+  el.dataset.label = d.kind === 'bad' ? 'رد شد' : d.chip;
+  el.innerHTML = `<div class="av">${fa(d.kind === 'bad' ? 'circle-xmark' : 'user')}</div>` +
+                 `<div><b>${esc(e.result === 'unknown' ? 'کارت ناشناس' : (e.name || '—'))}</b><small></small></div>`;
   const box = $('recent');
   box.prepend(el);
   while (box.children.length > 10) box.lastChild.remove();
+  markChips(false);
+}
+// newest chip is highlighted while its result is on screen; older ones fade as in the design
+function markChips(active) {
+  [...$('recent').children].forEach((el, i) => {
+    const now = active && i === 0;
+    el.classList.toggle('active', now);
+    el.classList.toggle('dim', active ? i > 0 : i > 1);
+    el.querySelector('small').textContent = el.dataset.label + ' • ' + (now ? 'همین حالا' : el.dataset.time);
+  });
 }
 function setSuspended(on) {
   if (on === suspended) return;
@@ -262,20 +329,20 @@ function setSuspended(on) {
   setIdle();
 }
 
-// ---- connection state: offline only after 2 failed polls in a row ----
+// ---- status pill: offline only after 2 failed polls in a row ----
 let fails = 0;
-function setNet(problem) {
-  $('netPill').classList.toggle('show', Boolean(problem));
-  $('netText').textContent = problem || '';
+function setPill(cls, text, title) {
+  for (const [p, t] of [['pill', 'pillText'], ['pill2', 'pillText2']]) {
+    $(p).className = 'pill ' + cls; $(t).textContent = text; $(p).title = title || '';
+  }
 }
 function setDoorState(doors) {
-  const dot = $('dot'), state = $('doorState');
-  if (suspended) { dot.className = 'dot warn'; state.textContent = 'تعلیق'; return; }
-  if (!doors.length) { dot.className = 'dot'; state.textContent = ''; return; }
+  if (suspended) return setPill('warn', 'تعلیق');
+  if (!doors.length) return setPill('none', 'بدون در');
   const online = doors.every(d => d.online);
-  dot.className = 'dot ' + (online ? 'on' : 'off');
-  state.textContent = online ? 'متصل' : (doors.length > 1 && doors.some(d => d.online) ? 'برخی درها قطع' : 'قطع');
-  dot.title = doors.map(d => d.name + (d.online ? ': متصل' : ': قطع')).join('\n');
+  const title = doors.map(d => d.name + (d.online ? ': آنلاین' : ': قطع')).join('\n');
+  if (online) setPill('', 'آنلاین', title);
+  else setPill('off', doors.length > 1 && doors.some(d => d.online) ? 'برخی درها قطع' : 'قطع', title);
 }
 
 // ---- polling ----
@@ -297,13 +364,10 @@ async function poll() {
     }
     setDoorState(j.doors);
     first = false; fails = 0;
-    setNet('');
   } catch (err) {
     fails++;
-    if (fails >= 2 || (err.message && !err.message.startsWith('Failed'))) {
-      setNet('ارتباط با سرور برقرار نیست' + (err.message && !err.message.startsWith('Failed') ? ' — ' + err.message : ' · تلاش دوباره'));
-      $('dot').className = 'dot off'; $('doorState').textContent = 'قطع';
-    }
+    const hard = err.message && !err.message.startsWith('Failed');
+    if (fails >= 2 || hard) setPill('off', 'سرور در دسترس نیست', hard ? err.message : '');
   }
   polling = false;
   pollTimer = setTimeout(poll, __POLL_MS__);
@@ -312,14 +376,10 @@ async function poll() {
 window.pollNow = () => { if (!first) poll(); };
 
 // ---- clock ----
-const fmtTime = new Intl.DateTimeFormat('fa-IR', {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false});
-const fmtDate = new Intl.DateTimeFormat('fa-IR', {weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'});
-function tick() {
-  const n = new Date(), p = {};
-  for (const x of fmtDate.formatToParts(n)) p[x.type] = x.value;
-  $('time').textContent = fmtTime.format(n);
-  $('date').textContent = `${p.weekday} ${p.day} ${p.month} ${p.year}`;   // دوشنبه ۱۱ آبان ۱۴۰۵
-}
+const fmtLong = new Intl.DateTimeFormat('fa-IR', {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false});
+const fmtShort = new Intl.DateTimeFormat('fa-IR', {hour: '2-digit', minute: '2-digit', hour12: false});
+const phone = matchMedia('(max-width:600px)');
+function tick() { $('clock').textContent = (phone.matches ? fmtShort : fmtLong).format(new Date()); }
 setInterval(tick, 1000); tick();
 
 // ---- misc: fullscreen, keep screen awake, door selector ----
@@ -333,7 +393,7 @@ keepAwake();
 const sel = $('doorSel');
 if (sel) sel.onchange = () => { location.search = sel.value ? '?door=' + sel.value : ''; };
 
-setIdle(); updateAudioUi(); poll();
+setDoorState([]); setIdle(); updateAudioUi(); poll();
 </script>
 </body>
 </html>
