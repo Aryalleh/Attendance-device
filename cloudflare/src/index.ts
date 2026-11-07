@@ -12,6 +12,7 @@ import * as J from "./jalali";
 import liveTemplate from "./live.html";
 import { dayBounds, fmtDt, jdate, jdt, jtime, localDate, now, setTimeZone, today } from "./time";
 import * as V from "./views";
+import * as UI from "./ui";
 
 export interface Env {
   DB: D1Database;
@@ -69,8 +70,13 @@ const back = (c: Ctx, fallback: string) => {
   return redirect(fallback);
 };
 
+const PLAN_EN: Record<string, string> = { free: "Free", starter: "Starter", business: "Business", enterprise: "Enterprise" };
+
 function pageCtx(c: Ctx): V.PageCtx {
+  const q = c.url.searchParams.get("lang");
+  if ((q === "fa" || q === "en") && c.session.data.lang !== q) c.session.set("lang", q);
   return {
+    lang: c.session.data.lang || "fa", path: c.url.pathname, planEn: c.org?.plan ? PLAN_EN[c.org.plan] : undefined,
     user: c.user?.username, userId: c.user?.id, owner: c.owner, orgName: c.org?.name,
     locked: Boolean(c.org && !c.org.approved && !c.owner), pending: c.pending,
     plan: c.org?.plan_name || undefined, planWarn: planWarn(c.org),
@@ -490,25 +496,23 @@ async function settleBilling(c: Ctx, org: Row): Promise<Row> {
 
 async function pricing(c: Ctx) {
   const [plans, products] = await Promise.all([B.plans(c.db), B.products(c.db)]);
-  return page(V.pricingPage(pageCtx(c), { plans, products }));
+  return page(UI.pricingPage(pageCtx(c), { plans, products, jsonld: V.pricingJsonLd(plans) }));
 }
 
 async function billing(c: Ctx) {
   const org = c.org!;
-  const [plans, u, invoices, rentals] = await Promise.all([
+  const [plans, u, invoices] = await Promise.all([
     B.plans(c.db), B.usage(c.db, org.id),
     all(c.db, "SELECT * FROM invoices WHERE org_id = ? AND (status = 'paid' OR (status = 'pending' AND kind = 'manual')) ORDER BY id DESC LIMIT 6", org.id),
-    all(c.db, "SELECT r.*, p.name FROM rentals r JOIN products p ON p.id = r.product_id WHERE r.org_id = ? AND r.ended_at IS NULL", org.id),
   ]);
   const state = B.subState(org);
   const plan = plans.find((p) => p.id === org.plan) || null;
   const nextPlan = plans.find((p) => p.id === (org.next_plan || org.plan)) || null;
   const next = nextPlan && !nextPlan.contact && nextPlan.id !== "free" && org.paid_until && state !== "canceling"
     ? await B.quote(c.db, c.env, { ...org, plan: nextPlan.id }, nextPlan, org.cycle || "month") : null;
-  return page(V.billingPage(pageCtx(c), {
-    org, plan, plans, state, usage: u, invoices, rentals, next, nextPlan,
+  return page(UI.billingPage(pageCtx(c), {
+    org, plan, state, usage: u, invoices, next, nextPlan,
     payments: B.paymentsEnabled(c.env), vat: B.vatPercent(c.env), daysLeft: B.daysLeft(org),
-    cycle: c.url.searchParams.get("cycle") === "year" ? "year" : (org.cycle || "month"),
   }));
 }
 
@@ -524,7 +528,7 @@ async function billingCheckout(c: Ctx) {
   const fit = B.fitError(plan!, await B.usage(c.db, org.id));
   if (fit) {
     c.session.flash(fit, "error");
-    return redirect("/billing#plans");
+    return redirect("/pricing");
   }
   const state = B.subState(org);
   if (plan!.id === "free") {
@@ -656,7 +660,8 @@ async function billingResume(c: Ctx) {
 
 async function invoicesList(c: Ctx) {
   const rows = await all(c.db, "SELECT * FROM invoices WHERE org_id = ? ORDER BY id DESC LIMIT 200", oid(c));
-  return page(V.invoicesPage(pageCtx(c), { rows }));
+  const st = B.subState(c.org!);
+  return page(V.invoicesPage(pageCtx(c), { rows, canCancel: st === "active" || st === "trialing" }));
 }
 
 async function ownInvoice(c: Ctx, id: number) {
@@ -678,7 +683,7 @@ async function invoicePay(c: Ctx, id: number) {
   // plan prices depend on the day they were quoted: an old unpaid one is quoted again
   if (inv.kind === "plan" && now() - inv.created_at > 3600) {
     c.session.flash("این پیش‌فاکتور منقضی شده است؛ طرح را دوباره انتخاب کنید.", "error");
-    return redirect("/billing#plans");
+    return redirect("/pricing");
   }
   return payInvoice(c, inv);
 }

@@ -78,6 +78,7 @@ export type SessionData = {
   exp?: number;
   flashes?: [string, string][];
   new_key?: { name: string; key: string };
+  lang?: "fa" | "en";
 };
 
 const COOKIE = "session";

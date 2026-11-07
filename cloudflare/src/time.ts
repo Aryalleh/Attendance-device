@@ -70,6 +70,20 @@ export function jdate(ts: number | null): string {
   return ts ? J.fa(J.jstr(localDate(ts))) : "—";
 }
 
+/** 'Nov 20, 2026' or 'Nov 20' (local time zone). */
+export function enDate(ts: number | null, year = true): string {
+  if (!ts) return "—";
+  return new Intl.DateTimeFormat("en-US", { timeZone: TZ, month: "short", day: "numeric", ...(year ? { year: "numeric" } : {}) })
+    .format(new Date(ts * 1000));
+}
+
+/** '۳۰ آبان' */
+export function jdayShort(ts: number | null): string {
+  if (!ts) return "—";
+  const [, m, d] = J.toJalali(localDate(ts));
+  return `${J.fa(d)} ${J.MONTHS[m - 1]}`;
+}
+
 /** '۳۰ آبان ۱۴۰۵' */
 export function jday(ts: number | null): string {
   if (!ts) return "—";

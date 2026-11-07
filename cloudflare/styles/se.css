@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind utilities;
+
+/* inline Font Awesome icons (see src/icons.ts) */
+.fa { display: inline-block; height: 1em; width: auto; fill: currentColor; vertical-align: -0.125em; overflow: visible; }
+i.fai { font-style: normal; display: inline-block; text-align: center; }
+/* the designs' own CSS */
+.pricing-card:hover { transform: translateY(-8px); transition: all 0.3s ease; }
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+/* small reset for the shared shell (sidebar, top bar, phone bars) on pages that still use style.css */
+.twr, .twr * { box-sizing: border-box; margin: 0; padding: 0; border: 0 solid #e5e7eb; }
+.twr a { color: inherit; text-decoration: inherit; }
+.twr a:hover { text-decoration: none; }
+.twr button { background: transparent; font: inherit; color: inherit; cursor: pointer; line-height: inherit; }
+.twr h1, .twr h3, .twr h4 { font-size: inherit; font-weight: inherit; }
+.twr ul { list-style: none; }
