@@ -70,6 +70,13 @@ export function jdate(ts: number | null): string {
   return ts ? J.fa(J.jstr(localDate(ts))) : "—";
 }
 
+/** '۳۰ آبان ۱۴۰۵' */
+export function jday(ts: number | null): string {
+  if (!ts) return "—";
+  const [y, m, d] = J.toJalali(localDate(ts));
+  return `${J.fa(d)} ${J.MONTHS[m - 1]} ${J.fa(y)}`;
+}
+
 export function jtime(ts: number | null, seconds = false): string {
   return ts ? J.fa(hms(ts, seconds)) : "—";
 }

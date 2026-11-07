@@ -7,6 +7,7 @@ import {
   sessionReport, slotOn, stmt,
 } from "./db";
 import { esc, Safe } from "./html";
+import * as B from "./billing";
 import * as J from "./jalali";
 import liveTemplate from "./live.html";
 import { dayBounds, fmtDt, jdate, jdt, jtime, localDate, now, setTimeZone, today } from "./time";
@@ -21,6 +22,9 @@ export interface Env {
   ACCESSCTL_WEBHOOK_URL?: string;  // POSTs every access event as JSON
   TZ?: string;                     // panel time zone (wrangler.toml [vars])
   LIVE_POLL_MS?: string;           // live screen refresh; each poll is one Worker request
+  ZARINPAL_MERCHANT?: string;      // wrangler secret put ZARINPAL_MERCHANT: enables online payment
+  ZARINPAL_SANDBOX?: string;       // "1" = Zarinpal sandbox (test payments, any UUID as merchant)
+  VAT_PERCENT?: string;            // VAT added to invoices (wrangler.toml [vars])
 }
 
 const KIOSK_HOLD_MS = 5000;  // a scan result stays on the kiosk screen this long (live.html HOLD_MS)
@@ -69,11 +73,20 @@ function pageCtx(c: Ctx): V.PageCtx {
   return {
     user: c.user?.username, userId: c.user?.id, owner: c.owner, orgName: c.org?.name,
     locked: Boolean(c.org && !c.org.approved && !c.owner), pending: c.pending,
+    plan: c.org?.plan_name || undefined, planWarn: planWarn(c.org),
     endpoint: c.endpoint, origin: c.url.origin, csrf: c.session.csrfToken(), flashes: c.session.popFlashes(),
   };
 }
 
 const oid = (c: Ctx): number => c.org!.id;
+
+function planWarn(org: Row | null) {
+  if (!org?.plan) return false;
+  const st = B.subState(org);
+  return st === "past_due" || st === "suspended" || (st === "trialing" && B.daysLeft(org) <= 3);
+}
+
+const ORG_SELECT = "SELECT o.*, p.name AS plan_name FROM orgs o LEFT JOIN plans p ON p.id = o.plan WHERE o.id = ?";
 
 /** A row of the current company, or 404 (ids from another company are never served). */
 async function ownRow(c: Ctx, table: "cards" | "devices" | "classes", id: number): Promise<Row> {
@@ -97,8 +110,9 @@ async function loadUser(c: Ctx) {
   if (c.owner) c.pending = (await first(c.db, "SELECT COUNT(*) AS n FROM orgs WHERE approved = 0"))?.n || 0;
   const orgId = u.org_id ?? c.session.data.view_org;
   if (orgId) {
-    c.org = await first(c.db, "SELECT * FROM orgs WHERE id = ?", orgId);
+    c.org = await first(c.db, ORG_SELECT, orgId);
     if (!c.org) c.session.set("view_org", undefined);
+    else c.org = await settleBilling(c, c.org);
   }
 }
 
@@ -119,7 +133,7 @@ const formStr = (c: Ctx, k: string) => {
 async function deviceFromKey(c: Ctx): Promise<Row> {
   const key = c.req.headers.get("X-Device-Key") || "";
   const dev = key ? await first(c.db,
-    "SELECT d.*, o.enabled AS org_enabled, o.name AS org_name FROM devices d JOIN orgs o ON o.id = d.org_id WHERE d.key = ?", key) : null;
+    `SELECT d.*, ${B.orgLiveSql("o")} AS org_enabled, o.name AS org_name, p.name AS plan_name FROM devices d JOIN orgs o ON o.id = d.org_id LEFT JOIN plans p ON p.id = o.plan WHERE d.key = ?`, key) : null;
   if (!dev) throw new HttpError(401, "unknown device key");
   return dev;
 }
@@ -208,7 +222,7 @@ async function liveEvents(c: Ctx, orgId: number, doorId: number) {
   const cutoff = now() - ONLINE_WINDOW;
   const [doors, org] = await Promise.all([
     all(c.db, "SELECT id, name, last_seen FROM devices WHERE org_id = ? ORDER BY name", orgId),
-    first(c.db, "SELECT name, enabled FROM orgs WHERE id = ?", orgId),
+    first(c.db, `SELECT o.name, ${B.orgLiveSql("o")} AS enabled FROM orgs o WHERE o.id = ?`, orgId),
   ]);
   return json({
     org: { name: org?.name || "", active: Boolean(org?.enabled) },
@@ -318,7 +332,7 @@ async function apiKiosk(c: Ctx) {
   return json({
     name: dev.name,
     url: `/kiosk/${await kioskToken(c.env.SECRET_KEY, dev as { id: number; key: string })}`,
-    org: { name: dev.org_name, active: Boolean(dev.org_enabled) },
+    org: { name: dev.org_name, active: Boolean(dev.org_enabled), plan: dev.plan_name || "" },
     lang: "fa",
     hold_ms: KIOSK_HOLD_MS,
   });
@@ -405,22 +419,22 @@ const countArg = (v: string) => {
 
 async function register(c: Ctx) {
   if (c.user) return redirect("/");
-  const v = { name: "", email: "", phone: "", users: "1", devices: "1" };
+  const planList = (await B.plans(c.db));
+  const wanted = c.url.searchParams.get("plan") || "";
+  const v = { name: "", email: "", phone: "", plan: planList.some((p) => p.id === wanted) ? wanted : "starter" };
   if (c.req.method === "POST") {
     v.name = cleanName(formStr(c, "name"), 60);
     v.email = formStr(c, "email").trim().toLowerCase();
     v.phone = normalizePhone(formStr(c, "phone").trim());
-    v.users = formStr(c, "users");
-    v.devices = formStr(c, "devices");
+    v.plan = formStr(c, "plan");
     const pw = formStr(c, "password");
-    const nUsers = countArg(v.users), nDevices = countArg(v.devices);
+    const plan = planList.find((p) => p.id === v.plan);
     let err = "";
     if (formStr(c, "website")) return redirect("/");   // honeypot: only bots fill the hidden field
     if (!v.name) err = "نام سازمان الزامی است.";
     else if (!EMAIL_RE.test(v.email) || v.email.length > 120) err = "ایمیل معتبر نیست.";
     else if (!/^\+?\d{8,15}$/.test(v.phone)) err = "شماره تلفن معتبر نیست (۸ تا ۱۵ رقم).";
-    else if (!nUsers) err = "تعداد کاربران باید بین ۱ تا ۱۰۰۰ باشد.";
-    else if (!nDevices) err = "تعداد دستگاه‌ها باید بین ۱ تا ۱۰۰۰ باشد.";
+    else if (!plan) err = "یک طرح انتخاب کنید.";
     else if (!validPassword(pw)) err = "رمز عبور باید حداقل ۸ کاراکتر باشد.";
     else if (pw !== formStr(c, "password2")) err = "تکرار رمز عبور یکسان نیست.";
     else if (await first(c.db, "SELECT 1 AS x FROM users WHERE username = ?", v.email)) err = "با این ایمیل قبلاً ثبت‌نام شده است. وارد شوید.";
@@ -432,8 +446,9 @@ async function register(c: Ctx) {
       try {
         // one transaction: the company and its first user (the email is the username)
         await c.db.batch([
-          c.db.prepare("INSERT INTO orgs(name, enabled, approved, email, phone, max_users, max_devices, created_at) VALUES (?, 1, 0, ?, ?, ?, ?, ?)")
-            .bind(v.name, v.email, v.phone, nUsers, nDevices, now()),
+          // the plan is stored now; its trial starts when a server owner approves the company
+          c.db.prepare("INSERT INTO orgs(name, enabled, approved, email, phone, plan, max_users, max_devices, max_cards, created_at) VALUES (?, 1, 0, ?, ?, ?, ?, ?, ?, ?)")
+            .bind(v.name, v.email, v.phone, plan!.id, plan!.max_admins, plan!.max_doors, plan!.max_cards, now()),
           c.db.prepare("INSERT INTO users(username, pw_hash, org_id) VALUES (?, ?, (SELECT id FROM orgs WHERE name = ?))")
             .bind(v.email, await hashPassword(pw), v.name),
         ]);
@@ -452,7 +467,311 @@ async function register(c: Ctx) {
       return redirect("/");
     }
   }
-  return page(V.registerPage(pageCtx(c), v));
+  return page(V.registerPage(pageCtx(c), v, planList));
+}
+
+// --- billing: plans, subscription, hardware store, Zarinpal ---------------------------------
+
+function limitMsg(c: Ctx, what: string, n: number) {
+  return c.org!.plan
+    ? `سقف ${what} در طرح فعلی شما ${J.fa(n)} است. برای افزایش، طرح را در صفحهٔ صورت‌حساب ارتقا دهید.`
+    : `سقف ${what} سازمان شما ${J.fa(n)} است. برای افزایش با مدیر سرور تماس بگیرید.`;
+}
+
+/** A cancelled subscription drops to the free plan once its paid period is over. */
+async function settleBilling(c: Ctx, org: Row): Promise<Row> {
+  if (!org.plan || org.plan === "free" || !org.paid_until || now() <= org.paid_until) return org;
+  if (!org.cancel_at_end && org.next_plan !== "free") return org;
+  const free = await first(c.db, "SELECT * FROM plans WHERE id = 'free'");
+  if (!free) return org;
+  await B.applyPlanStmt(c.db, org.id, free, { status: "free", paidUntil: null }).run();
+  return (await first(c.db, ORG_SELECT, org.id)) || org;
+}
+
+async function pricing(c: Ctx) {
+  const [plans, products] = await Promise.all([B.plans(c.db), B.products(c.db)]);
+  return page(V.pricingPage(pageCtx(c), { plans, products }));
+}
+
+async function billing(c: Ctx) {
+  const org = c.org!;
+  const [plans, u, invoices, rentals] = await Promise.all([
+    B.plans(c.db), B.usage(c.db, org.id),
+    all(c.db, "SELECT * FROM invoices WHERE org_id = ? AND (status = 'paid' OR (status = 'pending' AND kind = 'manual')) ORDER BY id DESC LIMIT 6", org.id),
+    all(c.db, "SELECT r.*, p.name FROM rentals r JOIN products p ON p.id = r.product_id WHERE r.org_id = ? AND r.ended_at IS NULL", org.id),
+  ]);
+  const state = B.subState(org);
+  const plan = plans.find((p) => p.id === org.plan) || null;
+  const nextPlan = plans.find((p) => p.id === (org.next_plan || org.plan)) || null;
+  const next = nextPlan && !nextPlan.contact && nextPlan.id !== "free" && org.paid_until && state !== "canceling"
+    ? await B.quote(c.db, c.env, { ...org, plan: nextPlan.id }, nextPlan, org.cycle || "month") : null;
+  return page(V.billingPage(pageCtx(c), {
+    org, plan, plans, state, usage: u, invoices, rentals, next, nextPlan,
+    payments: B.paymentsEnabled(c.env), vat: B.vatPercent(c.env), daysLeft: B.daysLeft(org),
+    cycle: c.url.searchParams.get("cycle") === "year" ? "year" : (org.cycle || "month"),
+  }));
+}
+
+async function billingCheckout(c: Ctx) {
+  const org = c.org!;
+  const plan = await first(c.db, "SELECT * FROM plans WHERE id = ?", formStr(c, "plan"));
+  const cycle = formStr(c, "cycle") === "year" ? "year" : "month";
+  if (!plan) abort(400, "طرح نامعتبر است.");
+  if (plan!.contact) {
+    c.session.flash(`برای طرح «${plan!.name}» با فروش تماس بگیرید؛ فاکتور آن به‌صورت دستی صادر می‌شود.`, "ok");
+    return redirect("/billing");
+  }
+  const fit = B.fitError(plan!, await B.usage(c.db, org.id));
+  if (fit) {
+    c.session.flash(fit, "error");
+    return redirect("/billing#plans");
+  }
+  const state = B.subState(org);
+  if (plan!.id === "free") {
+    if (state === "active" && org.paid_until) {
+      await run(c.db, "UPDATE orgs SET cancel_at_end = 1 WHERE id = ?", org.id);
+      c.session.flash(`طرح فعلی تا ${jdate(org.paid_until)} فعال می‌ماند و پس از آن به طرح رایگان می‌روید.`, "ok");
+    } else {
+      await B.applyPlanStmt(c.db, org.id, plan!, { status: "free", paidUntil: null }).run();
+      c.session.flash("طرح شما به «رایگان» تغییر کرد.", "ok");
+    }
+    return redirect("/billing");
+  }
+  const q = await B.quote(c.db, c.env, org, plan!, cycle);
+  if (q.kind === "downgrade") {
+    await run(c.db, "UPDATE orgs SET next_plan = ?, cancel_at_end = 0 WHERE id = ?", plan!.id, org.id);
+    c.session.flash(`از تمدید بعدی (${jdate(org.paid_until)}) طرح شما «${plan!.name}» می‌شود.`, "ok");
+    return redirect("/billing");
+  }
+  if (!formStr(c, "confirm")) {
+    return page(V.checkoutPage(pageCtx(c), { plan: plan!, cycle, q, vat: B.vatPercent(c.env), payments: B.paymentsEnabled(c.env) }));
+  }
+  if (!B.paymentsEnabled(c.env)) {
+    c.session.flash("پرداخت آنلاین هنوز فعال نشده است. برای خرید یا تمدید با پشتیبانی تماس بگیرید.", "error");
+    return redirect("/billing");
+  }
+  const inv = await createInvoice(c, {
+    kind: "plan", item: plan!.id, cycle, amount: q.amount, credit: q.credit, vat: q.vat, total: q.total, period_end: q.periodEnd, note: q.kind,
+  });
+  return payInvoice(c, inv);
+}
+
+async function createInvoice(c: Ctx, f: Row): Promise<Row> {
+  for (let attempt = 0; ; attempt++) {
+    const number = await B.invoiceNumber(c.db);
+    try {
+      const r = await run(c.db, `INSERT INTO invoices(org_id, number, kind, item, cycle, mode, qty, amount, credit, vat, total, note, period_end, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, f.org_id ?? oid(c), number, f.kind, f.item, f.cycle ?? null, f.mode ?? null, f.qty ?? 1,
+        f.amount, f.credit ?? 0, f.vat, f.total, f.note ?? "", f.period_end ?? null, now());
+      return (await first(c.db, "SELECT * FROM invoices WHERE id = ?", r.meta.last_row_id))!;
+    } catch (e) {
+      if (!isUniqueError(e) || attempt >= 3) throw e;
+    }
+  }
+}
+
+const KIND_FA: Record<string, string> = { plan: "اشتراک", hardware: "سخت‌افزار", manual: "فاکتور دستی" };
+
+/** Send the customer to Zarinpal for this invoice. */
+async function payInvoice(c: Ctx, inv: Row) {
+  if (!B.paymentsEnabled(c.env)) {
+    c.session.flash("پرداخت آنلاین هنوز فعال نشده است.", "error");
+    return redirect("/billing");
+  }
+  const org = c.org!;
+  try {
+    const authority = await B.zpRequest(c.env, {
+      toman: inv.total, orderId: inv.number, callback: `${c.url.origin}/billing/callback`,
+      description: `${KIND_FA[inv.kind] || ""} ${inv.number} · ${org.name}`.slice(0, 250), email: org.email || undefined, mobile: org.phone || undefined,
+    });
+    await run(c.db, "UPDATE invoices SET authority = ? WHERE id = ? AND status = 'pending'", authority, inv.id);
+    return redirect(B.startPayUrl(c.env, authority));
+  } catch (e) {
+    console.error("zarinpal request", e);
+    c.session.flash(e instanceof Error && e.message ? e.message : "اتصال به درگاه پرداخت ممکن نشد.", "error");
+    return redirect("/billing");
+  }
+}
+
+/** Effects of a paid invoice (only ever run once per invoice). */
+async function invoicePaidEffects(c: Ctx, inv: Row) {
+  if (inv.kind === "plan") {
+    const plan = await first(c.db, "SELECT * FROM plans WHERE id = ?", inv.item);
+    if (plan) await B.applyPlanStmt(c.db, inv.org_id, plan, { status: "active", paidUntil: inv.period_end, cycle: inv.cycle || "month" }).run();
+  } else if (inv.kind === "hardware" && inv.mode === "rent") {
+    const p = await first(c.db, "SELECT * FROM products WHERE id = ?", inv.item);
+    await run(c.db, "INSERT INTO rentals(org_id, product_id, qty, monthly, started_at) VALUES (?, ?, ?, ?, ?)",
+      inv.org_id, inv.item, inv.qty, p?.rent_month ?? Math.round(inv.amount / inv.qty), now());
+  } else if (inv.kind === "manual" && inv.period_end) {
+    await run(c.db, "UPDATE orgs SET paid_until = MAX(COALESCE(paid_until, 0), ?), sub_status = 'active', cancel_at_end = 0 WHERE id = ?", inv.period_end, inv.org_id);
+  }
+}
+
+/** Mark paid if still pending; true when this call did it. */
+async function markPaid(c: Ctx, inv: Row, refId: string, cardPan: string) {
+  const r = await run(c.db, "UPDATE invoices SET status = 'paid', paid_at = ?, ref_id = ?, card_pan = ? WHERE id = ? AND status != 'paid'",
+    now(), refId, cardPan, inv.id);
+  if (!r.meta.changes) return false;
+  await invoicePaidEffects(c, inv);
+  return true;
+}
+
+async function billingCallback(c: Ctx) {
+  const authority = c.url.searchParams.get("Authority") || "";
+  const status = c.url.searchParams.get("Status") || "";
+  const inv = authority ? await first(c.db, "SELECT * FROM invoices WHERE authority = ?", authority) : null;
+  if (!inv) return page(V.errorPage(404, "پرداختی با این شناسه پیدا نشد."), 404);
+  const to = c.user ? `/billing/invoices/${inv.id}` : "/login";
+  if (inv.status === "paid") return redirect(to);
+  if (status !== "OK") {
+    await run(c.db, "UPDATE invoices SET status = 'failed' WHERE id = ? AND status = 'pending' AND kind != 'manual'", inv.id);
+    c.session.flash("پرداخت انجام نشد یا لغو شد. مبلغی از حساب شما کم نشده است؛ اگر کم شده، ظرف ۷۲ ساعت برمی‌گردد.", "error");
+    return redirect(to);
+  }
+  const v = await B.zpVerify(c.env, authority, inv.total);
+  if (!v.ok) {
+    await run(c.db, "UPDATE invoices SET status = 'failed' WHERE id = ? AND status = 'pending' AND kind != 'manual'", inv.id);
+    c.session.flash(v.error, "error");
+    return redirect(to);
+  }
+  await markPaid(c, inv, v.refId, v.cardPan);
+  c.session.flash(`پرداخت موفق بود. کد پیگیری: ${v.refId}`, "ok");
+  return redirect(to);
+}
+
+async function billingCancel(c: Ctx) {
+  const state = B.subState(c.org!);
+  if (state === "active" || state === "trialing") {
+    await run(c.db, "UPDATE orgs SET cancel_at_end = 1 WHERE id = ?", oid(c));
+    c.session.flash(`اشتراک لغو شد. تا ${jdate(c.org!.paid_until)} همه امکانات فعال است و پس از آن به طرح رایگان می‌روید.`, "ok");
+  }
+  return redirect("/billing");
+}
+
+async function billingResume(c: Ctx) {
+  await run(c.db, "UPDATE orgs SET cancel_at_end = 0, next_plan = NULL WHERE id = ?", oid(c));
+  c.session.flash("اشتراک شما دوباره تمدیدشونده است.", "ok");
+  return redirect("/billing");
+}
+
+async function invoicesList(c: Ctx) {
+  const rows = await all(c.db, "SELECT * FROM invoices WHERE org_id = ? ORDER BY id DESC LIMIT 200", oid(c));
+  return page(V.invoicesPage(pageCtx(c), { rows }));
+}
+
+async function ownInvoice(c: Ctx, id: number) {
+  const inv = await first(c.db, "SELECT * FROM invoices WHERE id = ? AND org_id = ?", id, oid(c));
+  if (!inv) abort(404);
+  return inv!;
+}
+
+async function invoiceView(c: Ctx, id: number) {
+  const inv = await ownInvoice(c, id);
+  const item = inv.kind === "plan" ? await first(c.db, "SELECT name FROM plans WHERE id = ?", inv.item)
+    : inv.kind === "hardware" ? await first(c.db, "SELECT name FROM products WHERE id = ?", inv.item) : null;
+  return page(V.invoicePage(pageCtx(c), { inv, org: c.org!, itemName: item?.name || inv.note || "", vat: B.vatPercent(c.env) }));
+}
+
+async function invoicePay(c: Ctx, id: number) {
+  const inv = await ownInvoice(c, id);
+  if (inv.status === "paid") return redirect(`/billing/invoices/${id}`);
+  // plan prices depend on the day they were quoted: an old unpaid one is quoted again
+  if (inv.kind === "plan" && now() - inv.created_at > 3600) {
+    c.session.flash("این پیش‌فاکتور منقضی شده است؛ طرح را دوباره انتخاب کنید.", "error");
+    return redirect("/billing#plans");
+  }
+  return payInvoice(c, inv);
+}
+
+async function store(c: Ctx) {
+  const [products, orders, rentals] = await Promise.all([
+    B.products(c.db),
+    all(c.db, "SELECT i.*, p.name FROM invoices i LEFT JOIN products p ON p.id = i.item WHERE i.org_id = ? AND i.kind = 'hardware' AND i.status = 'paid' ORDER BY i.id DESC LIMIT 20", oid(c)),
+    all(c.db, "SELECT r.*, p.name FROM rentals r JOIN products p ON p.id = r.product_id WHERE r.org_id = ? AND r.ended_at IS NULL", oid(c)),
+  ]);
+  const state = B.subState(c.org!);
+  const canRent = Boolean(c.org!.plan && c.org!.plan !== "free" && c.org!.paid_until && (state === "active" || state === "trialing"));
+  return page(V.storePage(pageCtx(c), { products, orders, rentals, canRent, payments: B.paymentsEnabled(c.env), vat: B.vatPercent(c.env) }));
+}
+
+async function storeOrder(c: Ctx) {
+  const p = await first(c.db, "SELECT * FROM products WHERE id = ? AND active = 1", formStr(c, "product"));
+  const mode = formStr(c, "mode") === "rent" ? "rent" : "buy";
+  const qty = intArg(normalizePhone(formStr(c, "qty")), 1);
+  const address = Array.from(formStr(c, "address").trim()).slice(0, 400).join("");
+  if (!p) abort(400, "محصول نامعتبر است.");
+  let err = "";
+  if (qty < 1 || qty > 20) err = "تعداد باید بین ۱ تا ۲۰ باشد.";
+  else if (address.length < 10) err = "نشانی و کد پستی ارسال را کامل وارد کنید.";
+  else if (mode === "rent" && !p!.rent_month) err = "این محصول اجاره‌ای نیست.";
+  else if (mode === "rent") {
+    const state = B.subState(c.org!);
+    if (!(c.org!.plan && c.org!.plan !== "free" && c.org!.paid_until && (state === "active" || state === "trialing"))) {
+      err = "اجاره فقط همراه یک اشتراک پولی فعال ممکن است؛ اجاره هر ماه به تمدید اشتراک اضافه می‌شود.";
+    }
+  }
+  if (err) {
+    c.session.flash(err, "error");
+    return redirect("/store");
+  }
+  const amount = (mode === "rent" ? p!.rent_month : p!.price) * qty;
+  const vat = Math.round((amount * B.vatPercent(c.env)) / 100);
+  if (!B.paymentsEnabled(c.env)) {
+    c.session.flash("پرداخت آنلاین هنوز فعال نشده است. برای سفارش با پشتیبانی تماس بگیرید.", "error");
+    return redirect("/store");
+  }
+  const inv = await createInvoice(c, { kind: "hardware", item: p!.id, mode, qty, amount, vat, total: amount + vat, note: address });
+  return payInvoice(c, inv);
+}
+
+/** Billing actions on /admin; false if `action` isn't one of them. */
+async function adminBilling(c: Ctx, action: string, orgId: number): Promise<boolean> {
+  const num = (k: string) => { const v = formStr(c, k).trim(); return v === "" ? null : Math.max(0, intArg(normalizePhone(v))); };
+  if (action === "set_plan") {
+    const id = formStr(c, "plan");
+    const days = num("days");
+    if (id === "") {
+      await run(c.db, "UPDATE orgs SET plan = NULL, sub_status = NULL, paid_until = NULL, cancel_at_end = 0, next_plan = NULL WHERE id = ?", orgId);
+    } else {
+      const plan = await first(c.db, "SELECT * FROM plans WHERE id = ?", id);
+      if (!plan) return true;
+      await B.applyPlanStmt(c.db, orgId, plan, plan.id === "free" ? { status: "free", paidUntil: null }
+        : { status: "active", paidUntil: days ? now() + days * B.DAY : null }).run();
+    }
+    c.session.flash("طرح سازمان ذخیره شد.", "ok");
+  } else if (action === "plan_save") {
+    await run(c.db, `UPDATE plans SET name = ?, blurb = ?, price_month = ?, price_year = ?, max_doors = ?, max_admins = ?, max_cards = ?,
+        trial_days = ?, features = ? WHERE id = ?`,
+      cleanName(formStr(c, "name"), 40) || formStr(c, "id"), formStr(c, "blurb").trim().slice(0, 200), num("price_month") ?? 0, num("price_year") ?? 0,
+      num("max_doors"), num("max_admins"), num("max_cards"), num("trial_days") ?? 0, formStr(c, "features").trim().slice(0, 1000), formStr(c, "id"));
+    c.session.flash("طرح ذخیره شد. سقف سازمان‌هایی که این طرح را دارند در تمدید بعدی به‌روز می‌شود.", "ok");
+  } else if (action === "product_save") {
+    await run(c.db, "UPDATE products SET name = ?, blurb = ?, badge = ?, price = ?, rent_month = ?, active = ? WHERE id = ?",
+      cleanName(formStr(c, "name"), 60) || formStr(c, "id"), formStr(c, "blurb").trim().slice(0, 300), cleanName(formStr(c, "badge"), 30),
+      num("price") ?? 0, num("rent_month") || null, formStr(c, "active") ? 1 : 0, formStr(c, "id"));
+    c.session.flash("محصول ذخیره شد.", "ok");
+  } else if (action === "invoice_new") {
+    const amount = num("amount");
+    const days = num("days");
+    if (!amount || !(await first(c.db, "SELECT 1 AS x FROM orgs WHERE id = ?", orgId))) c.session.flash("سازمان و مبلغ را وارد کنید.", "error");
+    else {
+      const vat = Math.round((amount * B.vatPercent(c.env)) / 100);
+      const inv = await createInvoice(c, {
+        org_id: orgId, kind: "manual", item: "manual", amount, vat, total: amount + vat,
+        note: formStr(c, "note").trim().slice(0, 200), period_end: days ? now() + days * B.DAY : null,
+      });
+      c.session.flash(`فاکتور ${inv.number} صادر شد؛ مشتری آن را از صفحهٔ صورت‌حساب می‌پردازد.`, "ok");
+    }
+  } else if (action === "invoice_paid") {
+    const inv = await first(c.db, "SELECT * FROM invoices WHERE id = ?", intArg(formStr(c, "id")));
+    if (inv && (await markPaid(c, inv, formStr(c, "ref").trim().slice(0, 60) || "دستی", ""))) c.session.flash(`فاکتور ${inv.number} پرداخت‌شده ثبت شد.`, "ok");
+  } else if (action === "invoice_shipped") {
+    await run(c.db, "UPDATE invoices SET shipped = 1 - shipped WHERE id = ? AND kind = 'hardware'", intArg(formStr(c, "id")));
+  } else if (action === "rental_end") {
+    await run(c.db, "UPDATE rentals SET ended_at = ? WHERE id = ? AND ended_at IS NULL", now(), intArg(formStr(c, "id")));
+    c.session.flash("اجاره پایان یافت.", "ok");
+  } else return false;
+  return true;
 }
 
 // --- search engines and AI crawlers ------------------------------------------------------
@@ -460,7 +779,7 @@ async function register(c: Ctx) {
 const text = (body: string, type = "text/plain") =>
   new Response(body, { headers: { "Content-Type": `${type}; charset=utf-8`, "Cache-Control": "public, max-age=3600" } });
 
-const PRIVATE_PATHS = ["/api/", "/kiosk/", "/live/", "/dashboard", "/cards", "/doors", "/classes", "/events", "/attendance", "/settings", "/admin", "/logout"];
+const PRIVATE_PATHS = ["/api/", "/kiosk/", "/live/", "/billing", "/store", "/dashboard", "/cards", "/doors", "/classes", "/events", "/attendance", "/settings", "/admin", "/logout"];
 
 function robotsTxt(c: Ctx) {
   const dis = PRIVATE_PATHS.map((p) => `Disallow: ${p}`).join("\n");
@@ -472,7 +791,7 @@ function robotsTxt(c: Ctx) {
 }
 
 function sitemapXml(c: Ctx) {
-  const urls = [["/", "1.0"], ["/register", "0.8"]];
+  const urls = [["/", "1.0"], ["/pricing", "0.9"], ["/register", "0.8"]];
   return text(`<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${urls.map(([p, pr]) => `  <url><loc>${c.url.origin}${p}</loc><changefreq>weekly</changefreq><priority>${pr}</priority></url>`).join("\n")}
@@ -596,6 +915,13 @@ async function saveCard(c: Ctx, cardId: number | null): Promise<boolean> {
     c.session.flash("تاریخ اعتبار نامعتبر است (مثال: 1405/12/29).", "error");
     return false;
   }
+  if (enabled && !c.owner && c.org!.max_cards !== null) {
+    const n = await first(c.db, "SELECT COUNT(*) AS n FROM cards WHERE org_id = ? AND enabled = 1 AND id IS NOT ?", oid(c), cardId);
+    if ((n?.n || 0) >= c.org!.max_cards) {
+      c.session.flash(limitMsg(c, "کارت فعال", c.org!.max_cards), "error");
+      return false;
+    }
+  }
   const clash = await first(c.db, "SELECT id, name FROM cards WHERE org_id = ? AND uid = ? AND id IS NOT ?", oid(c), uid, cardId);
   if (clash) {
     c.session.flash(`این کارت قبلاً برای «${clash.name}» ثبت شده است.`, "error");
@@ -631,7 +957,14 @@ async function cardEdit(c: Ctx, id: number) {
 }
 
 async function cardToggle(c: Ctx, id: number) {
-  await ownRow(c, "cards", id);
+  const card = await ownRow(c, "cards", id);
+  if (!card.enabled && !c.owner && c.org!.max_cards !== null) {
+    const n = await first(c.db, "SELECT COUNT(*) AS n FROM cards WHERE org_id = ? AND enabled = 1", oid(c));
+    if ((n?.n || 0) >= c.org!.max_cards) {
+      c.session.flash(limitMsg(c, "کارت فعال", c.org!.max_cards), "error");
+      return back(c, "/cards");
+    }
+  }
   await c.db.batch([stmt(c.db, "UPDATE cards SET enabled = 1 - enabled WHERE id = ?", id), bumpCardsRev(c.db)]);
   return back(c, "/cards");
 }
@@ -673,7 +1006,7 @@ async function doorNew(c: Ctx) {
   if (!c.owner && c.org!.max_devices !== null) {
     const n = await first(c.db, "SELECT COUNT(*) AS n FROM devices WHERE org_id = ?", oid(c));
     if ((n?.n || 0) >= c.org!.max_devices) {
-      c.session.flash(`سقف دستگاه‌های سازمان شما ${J.fa(c.org!.max_devices)} است. برای افزایش با مدیر سرور تماس بگیرید.`, "error");
+      c.session.flash(limitMsg(c, "در", c.org!.max_devices), "error");
       return redirect("/doors");
     }
   }
@@ -983,7 +1316,7 @@ async function settings(c: Ctx) {
     else if (action === "add_user") {
       const n = await first(c.db, "SELECT COUNT(*) AS n FROM users WHERE org_id = ?", oid(c));
       if (!c.owner && c.org!.max_users !== null && (n?.n || 0) >= c.org!.max_users) {
-        c.session.flash(`سقف کاربران سازمان شما ${J.fa(c.org!.max_users)} است. برای افزایش با مدیر سرور تماس بگیرید.`, "error");
+        c.session.flash(limitMsg(c, "مدیر", c.org!.max_users), "error");
       } else await addUser(c, oid(c));
     } else if (action === "del_user") {
       const id = intArg(formStr(c, "id"));
@@ -1031,12 +1364,21 @@ async function admin(c: Ctx) {
           c.session.flash("سازمانی با این نام وجود دارد.", "error");
         }
       }
-    } else if (action === "approve" || action === "limits") {
+    } else if (action === "approve") {
+      const org = await first(c.db, "SELECT * FROM orgs WHERE id = ? AND approved = 0", orgId);
+      const plan = await first(c.db, "SELECT * FROM plans WHERE id = ?", formStr(c, "plan"));
+      if (org && plan) {
+        await c.db.batch([c.db.prepare("UPDATE orgs SET approved = 1 WHERE id = ?").bind(orgId), B.startPlanStmt(c.db, orgId, plan)]);
+        c.session.flash(`سازمان «${org.name}» با طرح «${plan.name}» تأیید شد و اکنون به پنل دسترسی دارد.`, "ok");
+      }
+    } else if (await adminBilling(c, action, orgId)) {
+      // handled
+    } else if (action === "limits") {
       const lim = (k: string) => countArg(formStr(c, k)) || null;   // empty or 0 = unlimited
       const org = await first(c.db, "SELECT * FROM orgs WHERE id = ?", orgId);
       if (org) {
-        await run(c.db, "UPDATE orgs SET approved = 1, max_users = ?, max_devices = ? WHERE id = ?", lim("max_users"), lim("max_devices"), orgId);
-        c.session.flash(action === "approve" ? `سازمان «${org.name}» تأیید شد و اکنون به پنل دسترسی دارد.` : "سقف‌ها ذخیره شد.", "ok");
+        await run(c.db, "UPDATE orgs SET max_users = ?, max_devices = ?, max_cards = ? WHERE id = ?", lim("max_users"), lim("max_devices"), lim("max_cards"), orgId);
+        c.session.flash("سقف‌ها ذخیره شد.", "ok");
       }
     } else if (action === "reject") {
       const org = await first(c.db, "SELECT * FROM orgs WHERE id = ? AND approved = 0", orgId);
@@ -1087,7 +1429,7 @@ async function admin(c: Ctx) {
     }
     return redirect("/admin");
   }
-  const [orgs, users] = await Promise.all([
+  const [orgs, users, adminPlans, adminProducts, invoices, rentals] = await Promise.all([
     all(c.db,
       `SELECT o.*,
          (SELECT COUNT(*) FROM devices WHERE org_id = o.id) AS n_devices,
@@ -1096,11 +1438,16 @@ async function admin(c: Ctx) {
          (SELECT MAX(ts) FROM events WHERE org_id = o.id) AS last_event
        FROM orgs o ORDER BY o.approved, o.name COLLATE NOCASE`),
     all(c.db, "SELECT id, username, org_id FROM users ORDER BY username"),
+    B.plans(c.db),
+    B.products(c.db, true),
+    all(c.db, "SELECT i.*, o.name AS org_name FROM invoices i JOIN orgs o ON o.id = i.org_id ORDER BY i.id DESC LIMIT 50"),
+    all(c.db, "SELECT r.*, p.name, o.name AS org_name FROM rentals r JOIN products p ON p.id = r.product_id JOIN orgs o ON o.id = r.org_id WHERE r.ended_at IS NULL ORDER BY r.started_at DESC"),
   ]);
   const byOrg = new Map<number | null, Row[]>();
   for (const u of users) byOrg.set(u.org_id, [...(byOrg.get(u.org_id) || []), u]);
   return page(V.adminPage(pageCtx(c), {
     orgs: orgs.filter((o) => o.approved), pending: orgs.filter((o) => !o.approved).sort((a, b) => a.created_at - b.created_at), users: byOrg, apiEnabled: Boolean(c.env.ACCESSCTL_API_TOKEN), webhook: c.env.ACCESSCTL_WEBHOOK_URL || "",
+    plans: adminPlans, products: adminProducts, invoices, rentals, payments: B.paymentsEnabled(c.env),
   }));
 }
 
@@ -1144,6 +1491,17 @@ route("GET", "/llms.txt", "llms", llmsTxt, "none");
 route("GET", "/live/feed", "live_feed", liveFeed, "none");
 route("GET", "/kiosk/:token", "kiosk", kiosk, "none");
 route("GET", "/kiosk/:token/feed", "kiosk_feed", kioskFeed, "none");
+route("GET", "/pricing", "pricing", pricing, "none");
+route("GET", "/billing/callback", "billing_callback", billingCallback, "none");
+route("GET", "/billing", "billing", billing);
+route("POST", "/billing/checkout", "billing_checkout", billingCheckout);
+route("POST", "/billing/cancel", "billing_cancel", billingCancel);
+route("POST", "/billing/resume", "billing_resume", billingResume);
+route("GET", "/billing/invoices", "invoices", invoicesList);
+route("GET", "/billing/invoices/:int", "invoice", invoiceView);
+route("POST", "/billing/invoices/:int/pay", "invoice_pay", invoicePay);
+route("GET", "/store", "store", store);
+route("POST", "/store/order", "store_order", storeOrder);
 route("GET", "/dashboard", "dashboard", dashboard);
 route("GET", "/cards", "cards", cardsList);
 route("GET,POST", "/cards/new", "card_new", cardNew);
@@ -1238,7 +1596,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   }
 
   // only the public landing and sign-up pages may be indexed
-  const indexable = !c.user && (r.endpoint === "live" || r.endpoint === "register") && res.status === 200;
+  const indexable = !c.user && (r.endpoint === "live" || r.endpoint === "register" || r.endpoint === "pricing") && res.status === 200;
   if (!indexable && !["robots", "sitemap", "llms"].includes(r.endpoint)) {
     res = new Response(res.body, res);
     res.headers.set("X-Robots-Tag", "noindex, nofollow");

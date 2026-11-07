@@ -1,8 +1,11 @@
 // Panel pages — port of server/templates/*.html (Persian, RTL).
 import { html, qs, raw, Safe } from "./html";
 import type { ClassSession, MemberTotal, Presence, Row } from "./db";
+import type { Quote } from "./billing";
+import { money, subState } from "./billing";
+import { icon } from "./icons";
 import * as J from "./jalali";
-import { ago, jdt, jinput, jtime } from "./time";
+import { ago, jdate, jday, jdt, jinput, jtime } from "./time";
 
 export const WEEKDAYS_FA = ["دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه", "یکشنبه"];   // index = 0=Mon..6=Sun
 const WEEK_ORDER = [5, 6, 0, 1, 2, 3, 4];   // Saturday first
@@ -31,6 +34,8 @@ export type PageCtx = {
   orgName?: string;
   locked?: boolean;    // company registered but not yet approved: no panel menu
   pending?: number;    // registrations waiting (shown to server owners)
+  plan?: string;       // current plan name, for the top-bar pill
+  planWarn?: boolean;  // trial ending soon, payment due or suspended
   endpoint: string;
   origin: string;      // https://host, for canonical and Open Graph URLs
   csrf: string;
@@ -38,11 +43,15 @@ export type PageCtx = {
 };
 
 const FONT = "/static/fonts/Vazirmatn.woff2";
-const NAV: [string, string, string][] = [
-  ["live", "/", "نمایشگر"], ["dashboard", "/dashboard", "داشبورد"], ["cards", "/cards", "کارت‌ها"],
-  ["doors", "/doors", "دستگاه‌ها"], ["classes", "/classes", "کلاس‌ها"], ["events", "/events", "گزارش تردد"],
-  ["attendance", "/attendance", "حضور روزانه"], ["settings", "/settings", "تنظیمات"],
+const NAV: [string, string, string, string][] = [
+  ["live", "/", "نمایشگر زنده", "tv"], ["dashboard", "/dashboard", "داشبورد", "chart-line"], ["doors", "/doors", "درب‌ها", "door-open"],
+  ["cards", "/cards", "کارت‌ها", "id-card"], ["classes", "/classes", "کلاس‌ها", "graduation-cap"], ["events", "/events", "رویدادها", "clock-rotate-left"],
+  ["attendance", "/attendance", "حضور روزانه", "calendar-check"],
 ];
+const NAV_SETTINGS: [string, string, string, string][] = [
+  ["settings", "/settings", "کاربران و تنظیمات", "gear"], ["billing", "/billing", "صورت‌حساب", "credit-card"], ["store", "/store", "فروشگاه سخت‌افزار", "shop"],
+];
+export const BRAND = "SecureEntry";
 
 // --- SEO --------------------------------------------------------------------------
 
@@ -76,34 +85,101 @@ function metaTags(c: PageCtx, title: string, m: Meta) {
 ${(m.jsonld || []).map(ldJson)}`;
 }
 
-export function layout(c: PageCtx, title: string, body: Safe, meta?: Meta): Safe {
-  const navOn = (ep: string) => c.endpoint === ep || (ep === "cards" && (c.endpoint === "card_new" || c.endpoint === "card_edit"))
-    || (ep === "classes" && (c.endpoint === "class_view" || c.endpoint === "class_session"));
-  return html`<!doctype html>
-<html lang="fa" dir="rtl">
-<head>
+const ALIASES: Record<string, string> = {
+  card_new: "cards", card_edit: "cards", class_view: "classes", class_session: "classes",
+  invoices: "billing", invoice: "billing",
+};
+
+function head(c: PageCtx, title: string, meta?: Meta) {
+  return html`<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title>
 <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-<meta name="theme-color" content="#2563eb">
+<meta name="theme-color" content="#4f46e5">
 ${meta ? metaTags(c, title, meta) : ""}
 <link rel="preload" href="${FONT}" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-${c.user ? html`<header><div class="in">
-  <span class="brand">🔑 ${c.orgName || "کنترل تردد"}</span>
+</head>`;
+}
+
+const flashes = (c: PageCtx) => c.flashes.map(([cat, msg]) => html`<div class="flash ${cat}">${msg}</div>`);
+const logo = (cls = "") => html`<span class="logo ${cls}">${icon("shield-halved")}</span>`;
+
+/** Public pages (landing, pricing, sign-up, login): the header and footer of the SecureEntry pricing design. */
+function publicShell(c: PageCtx, title: string, body: Safe, meta?: Meta): Safe {
+  const on = (ep: string) => (c.endpoint === ep ? "on" : "");
+  return html`<!doctype html>
+<html lang="fa" dir="rtl">
+${head(c, title, meta)}
+<body class="pub">
+<header class="pubhead"><div class="in">
+  <a class="pbrand" href="/">${logo()}<b>${BRAND}</b></a>
   <nav>
-    ${c.orgName && !c.locked ? NAV.map(([ep, href, label]) => html`<a href="${href}" class="${navOn(ep) ? "on" : ""}">${label}</a>`) : ""}
-    ${c.owner ? html`<a href="/admin" class="${c.endpoint === "admin" ? "on" : ""}">مدیریت سرور${c.pending ? html` <span class="pill warn">${J.fa(c.pending)}</span>` : ""}</a>` : ""}
+    <a href="/#features">امکانات</a>
+    <a href="/pricing" class="${on("pricing")}">قیمت‌گذاری</a>
+    <a href="/pricing#hardware">سخت‌افزار</a>
+    <a href="/#faq">سوالات متداول</a>
   </nav>
-  <form method="post" action="/logout">${csrf(c)}<button class="btn sec sm">خروج (${c.user})</button></form>
-</div></header>` : ""}
-<main>
-${c.flashes.map(([cat, msg]) => html`<div class="flash ${cat}">${msg}</div>`)}
+  <div class="pact">
+    ${c.user ? html`<a class="btn" href="/dashboard">ورود به پنل</a>` : html`
+    <a class="plink" href="/login">ورود</a>
+    <a class="btn" href="/register">شروع کنید</a>`}
+  </div>
+</div></header>
+<main class="pubmain">
+${flashes(c)}
 ${body}
 </main>
+<footer class="pubfoot"><div class="in">
+  <div class="fcol fabout">
+    <a class="pbrand" href="/">${logo()}<b>${BRAND}</b></a>
+    <p>کنترل دسترسی مدرن و مدیریت حضور و غیاب. اولویت با ابر، مستقل از سخت‌افزار.</p>
+  </div>
+  <div class="fcol"><b>محصول</b><a href="/#features">ویژگی‌ها</a><a href="/pricing#hardware">سخت‌افزار</a><a href="/pricing">قیمت‌گذاری</a><a href="/llms.txt">مستندات API</a></div>
+  <div class="fcol"><b>شروع</b><a href="/register">ثبت‌نام سازمان</a><a href="/login">ورود به پنل</a><a href="/#faq">سوالات متداول</a></div>
+  <p class="copy">© ${J.fa(new Date().getFullYear())} ${BRAND} · ${SITE_NAME}</p>
+</div></footer>
+</body>
+</html>`;
+}
+
+/** Panel pages: the dark sidebar and top bar of the SecureEntry billing design. */
+export function layout(c: PageCtx, title: string, body: Safe, meta?: Meta, opts: { public?: boolean; heading?: string } = {}): Safe {
+  if (!c.user || opts.public) return publicShell(c, title, body, meta);
+  const cur = ALIASES[c.endpoint] || c.endpoint;
+  const item = ([ep, href, label, ic]: string[]) =>
+    html`<a href="${href}" class="${cur === ep ? "on" : ""}">${icon(ic)}<span>${label}</span></a>`;
+  const showNav = c.orgName && !c.locked;
+  return html`<!doctype html>
+<html lang="fa" dir="rtl">
+${head(c, title, meta)}
+<body>
+<div class="app">
+<aside class="side">
+  <a class="sbrand" href="${showNav ? "/dashboard" : "/"}">${logo()}<b>${BRAND}</b></a>
+  <nav>
+    ${showNav ? NAV.map(item) : ""}
+    ${showNav ? html`<div class="sgroup">تنظیمات</div>${NAV_SETTINGS.map(item)}` : ""}
+    ${c.owner ? html`<div class="sgroup">سرور</div><a href="/admin" class="${cur === "admin" ? "on" : ""}">${icon("user-shield")}<span>مدیریت سرور</span>${c.pending ? html`<span class="count">${J.fa(c.pending)}</span>` : ""}</a>` : ""}
+  </nav>
+  <div class="suser">
+    <span class="av">${(c.user || "?").slice(0, 1).toUpperCase()}</span>
+    <div class="who"><b class="ltr">${c.user}</b><small>${c.orgName || "مدیر سرور"}</small></div>
+    <form method="post" action="/logout">${csrf(c)}<button class="iconbtn" title="خروج" aria-label="خروج">${icon("arrow-right-from-bracket")}</button></form>
+  </div>
+</aside>
+<div class="appmain">
+  <div class="topbar">
+    <b class="ttl">${opts.heading || c.orgName || "مدیریت سرور"}</b>
+    ${c.plan && showNav ? html`<a class="planpill ${c.planWarn ? "warn" : ""}" href="/billing"><i></i>طرح فعلی: ${c.plan}</a>` : ""}
+  </div>
+  <main>
+${flashes(c)}
+${body}
+  </main>
+</div>
+</div>
 </body>
 </html>`;
 }
@@ -147,7 +223,7 @@ const dot = (on: boolean) => html`<span class="dot ${on ? "on" : "off"}"></span>
 export function loginPage(c: PageCtx) {
   return layout(c, "ورود · کنترل تردد", html`
 <div class="login box">
-  <h1>🔑 کنترل تردد</h1>
+  <h1 class="authh">${logo("lg")}<span>ورود به ${BRAND}</span></h1>
   <form method="post">
     ${csrf(c)}
     <label>ایمیل یا نام کاربری</label><input name="username" dir="ltr" autocomplete="username" autofocus required>
@@ -177,8 +253,8 @@ export const FAQ: [string, string][] = [
 ];
 
 export function landingPage(c: PageCtx) {
-  const feature = (icon: string, title: string, text: string) =>
-    html`<div class="box feature"><div class="ficon" aria-hidden="true">${icon}</div><h3>${title}</h3><p class="mut">${text}</p></div>`;
+  const feature = (ic: string, title: string, text: string) =>
+    html`<div class="box feature"><div class="ficon" aria-hidden="true">${icon(ic)}</div><h3>${title}</h3><p class="mut">${text}</p></div>`;
   const title = "کنترل تردد | سامانهٔ حضور و غیاب با کارت RFID و NFC";
   const site = c.origin + "/";
   const jsonld = [
@@ -203,52 +279,50 @@ export function landingPage(c: PageCtx) {
     },
   ];
   return layout(c, title, html`
-<section class="hero">
-  <div class="brandline">🔑 ${SITE_NAME}</div>
-  <h1>سامانهٔ حضور و غیاب و کنترل تردد با کارت، برای سازمان شما</h1>
+<section class="phero">
+  <span class="eyebrow">${icon("shield-halved")} ${BRAND} · ${SITE_NAME}</span>
+  <h1>حضور و غیاب و کنترل تردد با کارت،<br><span>برای هر سازمان مدرن</span></h1>
   <p class="lead">کارمندان یا دانشجویان کارت RFID را به دستگاه یا گوشی NFC نزدیک می‌کنند؛ ساعت ورود و خروج، حضور در کلاس‌ها و گزارش‌ها همه در یک پنل تحت وب ثبت می‌شود.</p>
   <div class="cta">
-    <a class="btn big" href="/register">ثبت‌نام سازمان</a>
-    <a class="btn sec big" href="/login">ورود به پنل</a>
+    <a class="btn big" href="/register">شروع دورهٔ آزمایشی ۱۴ روزه</a>
+    <a class="btn ghost big" href="/pricing">مشاهدهٔ قیمت‌ها</a>
   </div>
 </section>
 
-<section aria-labelledby="f-title">
+<section class="lsec" id="features" aria-labelledby="f-title">
 <h2 id="f-title" class="sec-title">امکانات</h2>
 <div class="features">
-  ${feature("📡", "دستگاه کارت‌خوان RFID", "دستگاه ارزان با ماژول RC522 و Wemos D1 mini، یا یک گوشی اندرویدی دارای NFC را به‌عنوان دستگاه ورود تعریف کنید.")}
-  ${feature("🖥️", "نمایشگر زندهٔ تردد", "نام و نتیجهٔ هر تردد همان لحظه روی نمایشگر یا تبلت کنار در دیده می‌شود.")}
-  ${feature("🎓", "حضور و غیاب کلاس", "برای هر کلاس اعضا و زمان‌بندی تعریف کنید و حاضران، غایبان و مدت حضور هر جلسه را ببینید.")}
-  ${feature("📊", "گزارش و خروجی", "گزارش تردد، حضور روزانه، افراد داخل ساختمان و خروجی CSV برای هر بازهٔ زمانی.")}
-  ${feature("🏢", "چند سازمانی", "هر شرکت، مدرسه یا دانشگاه کاربران، کارت‌ها و گزارش‌های جداگانهٔ خود را دارد.")}
-  ${feature("🔌", "اتصال به سامانه‌های دیگر", "API فقط‌خواندنی و Webhook برای ارسال هر تردد به نرم‌افزار حقوق و دستمزد یا سامانه‌های دیگر.")}
+  ${feature("microchip", "دستگاه کارت‌خوان RFID", "دستگاه ارزان با ماژول RC522 و Wemos D1 mini، یا یک گوشی اندرویدی دارای NFC را به‌عنوان دستگاه ورود تعریف کنید.")}
+  ${feature("tv", "نمایشگر زندهٔ تردد", "نام و نتیجهٔ هر تردد همان لحظه روی نمایشگر یا تبلت کنار در دیده می‌شود.")}
+  ${feature("graduation-cap", "حضور و غیاب کلاس", "برای هر کلاس اعضا و زمان‌بندی تعریف کنید و حاضران، غایبان و مدت حضور هر جلسه را ببینید.")}
+  ${feature("chart-line", "گزارش و خروجی", "گزارش تردد، حضور روزانه، افراد داخل ساختمان و خروجی CSV برای هر بازهٔ زمانی.")}
+  ${feature("users", "چند سازمانی", "هر شرکت، مدرسه یا دانشگاه کاربران، کارت‌ها و گزارش‌های جداگانهٔ خود را دارد.")}
+  ${feature("plug", "اتصال به سامانه‌های دیگر", "API فقط‌خواندنی و Webhook برای ارسال هر تردد به نرم‌افزار حقوق و دستمزد یا سامانه‌های دیگر.")}
 </div>
 </section>
 
-<section class="box steps" aria-labelledby="s-title">
+<section class="box steps lsec" aria-labelledby="s-title">
   <h2 id="s-title">چطور شروع کنم؟</h2>
   <ol>
-    <li>فرم ثبت‌نام را با ایمیل، شماره تماس و تعداد کاربران و دستگاه‌های مورد نیاز پر کنید.</li>
-    <li>مدیر سامانه درخواست شما را بررسی و تأیید می‌کند.</li>
-    <li>وارد پنل شوید، دستگاه‌ها و کارت‌ها را تعریف کنید و شروع کنید.</li>
+    <li>یک طرح انتخاب کنید و فرم ثبت‌نام را با ایمیل و شماره تماس پر کنید.</li>
+    <li>مدیر سامانه درخواست شما را تأیید می‌کند و دورهٔ آزمایشی ۱۴ روزه شروع می‌شود.</li>
+    <li>دستگاه‌ها و کارت‌ها را تعریف کنید؛ پیش از پایان دوره، اشتراک را آنلاین با زرین‌پال پرداخت کنید.</li>
   </ol>
-  <p><a class="btn" href="/register">شروع ثبت‌نام</a></p>
+  <p><a class="btn" href="/register">شروع ثبت‌نام</a> <a class="btn ghost" href="/pricing">مقایسهٔ طرح‌ها</a></p>
 </section>
 
-<section class="box faq" aria-labelledby="q-title">
+<section class="box faq lsec" id="faq" aria-labelledby="q-title">
   <h2 id="q-title">پرسش‌های متداول</h2>
   ${FAQ.map(([q, a]) => html`<details><summary><h3>${q}</h3></summary><p>${a}</p></details>`)}
-</section>
-
-<footer class="site-foot mut">© ${SITE_NAME} · <a href="/register">ثبت‌نام</a> · <a href="/login">ورود</a></footer>`,
+</section>`,
     { description: SITE_DESC, path: "/", jsonld });
 }
 
-export function registerPage(c: PageCtx, v: { name: string; email: string; phone: string; users: string; devices: string }) {
+export function registerPage(c: PageCtx, v: { name: string; email: string; phone: string; plan: string }, plans: Row[]) {
   return layout(c, "ثبت‌نام سازمان | کنترل تردد، حضور و غیاب با کارت", html`
 <div class="register box">
   <h1>ثبت‌نام سازمان</h1>
-  <p class="mut">پس از ثبت‌نام وارد پنل می‌شوید، اما تا تأیید مدیر سامانه پنل قفل است.</p>
+  <p class="mut">پس از ثبت‌نام وارد پنل می‌شوید، اما تا تأیید مدیر سامانه پنل قفل است. دورهٔ آزمایشی از زمان تأیید شروع می‌شود و تا پایان آن پرداختی لازم نیست. <a href="/pricing">مقایسهٔ طرح‌ها</a></p>
   <form method="post">
     ${csrf(c)}
     <div class="hp" aria-hidden="true"><label>وب‌سایت</label><input name="website" tabindex="-1" autocomplete="off"></div>
@@ -257,9 +331,11 @@ export function registerPage(c: PageCtx, v: { name: string; email: string; phone
       <div><label>ایمیل (نام کاربری شما)</label><input name="email" type="email" dir="ltr" value="${v.email}" autocomplete="email" required></div>
       <div><label>شماره تلفن همراه</label><input name="phone" type="tel" dir="ltr" value="${v.phone}" placeholder="09121234567" autocomplete="tel" required></div>
     </div>
-    <div class="row">
-      <div><label>تعداد کاربران پنل مورد نیاز</label><input name="users" type="number" dir="ltr" min="1" max="1000" value="${v.users}" required></div>
-      <div><label>تعداد دستگاه‌های مورد نیاز</label><input name="devices" type="number" dir="ltr" min="1" max="1000" value="${v.devices}" required></div>
+    <label>طرح</label>
+    <div class="planpick">
+      ${plans.map((p) => html`<label class="pp"><input type="radio" name="plan" value="${p.id}" ${v.plan === p.id ? "checked" : ""} required>
+        <span><b>${p.name}</b><small>${p.contact ? "تماس با فروش" : p.price_month ? html`${money(p.price_month)} تومان / ماهانه` : "رایگان"}</small>
+        <small class="mut">${p.trial_days ? `${J.fa(p.trial_days)} روز آزمایش رایگان` : p.max_doors !== null ? `${J.fa(p.max_doors)} درب · ${J.fa(p.max_cards)} کارت` : "نامحدود"}</small></span></label>`)}
     </div>
     <div class="row">
       <div><label>رمز عبور (حداقل ۸ کاراکتر)</label><input name="password" type="password" dir="ltr" minlength="8" autocomplete="new-password" required></div>
@@ -270,7 +346,7 @@ export function registerPage(c: PageCtx, v: { name: string; email: string; phone
   <p class="mut">قبلاً ثبت‌نام کرده‌اید؟ <a href="/login">ورود</a> · <a href="/">صفحه اصلی</a></p>
 </div>`, {
     path: "/register",
-    description: "ثبت‌نام رایگان سازمان در سامانهٔ کنترل تردد و حضور و غیاب با کارت RFID: نام سازمان، ایمیل، شماره تماس و تعداد کاربران و دستگاه‌ها را وارد کنید.",
+    description: "ثبت‌نام سازمان در سامانهٔ کنترل تردد و حضور و غیاب با کارت RFID: طرح رایگان یا ۱۴ روز آزمایش رایگان طرح‌های استارتر و تجاری.",
   });
 }
 
@@ -283,8 +359,8 @@ export function pendingPage(c: PageCtx, org: Row) {
   <table>
     <tr><th>ایمیل</th><td class="ltr">${org.email || "—"}</td></tr>
     <tr><th>تلفن</th><td class="ltr">${org.phone || "—"}</td></tr>
-    <tr><th>کاربران درخواستی</th><td>${org.max_users ? J.fa(org.max_users) : "—"}</td></tr>
-    <tr><th>دستگاه‌های درخواستی</th><td>${org.max_devices ? J.fa(org.max_devices) : "—"}</td></tr>
+    <tr><th>طرح انتخابی</th><td>${org.plan_name || "—"}</td></tr>
+    <tr><th>سقف درب / مدیر</th><td>${org.max_devices ? J.fa(org.max_devices) : "∞"} / ${org.max_users ? J.fa(org.max_users) : "∞"}</td></tr>
   </table>
   <p><a class="btn sec" href="/">بررسی دوباره</a></p>
 </div>`);
@@ -590,11 +666,18 @@ export function settingsPage(c: PageCtx, v: { users: Row[]; nEvents: number }) {
 
 // --- server owner -------------------------------------------------------------------
 
-export function adminPage(c: PageCtx, v: { orgs: Row[]; pending: Row[]; users: Map<number | null, Row[]>; apiEnabled: boolean; webhook: string }) {
+export function adminPage(c: PageCtx, v: {
+  orgs: Row[]; pending: Row[]; users: Map<number | null, Row[]>; apiEnabled: boolean; webhook: string;
+  plans: Row[]; products: Row[]; invoices: Row[]; rentals: Row[]; payments: boolean;
+}) {
+  const planSelect = (cur: string | null, withNone: boolean) => html`<select name="plan">
+    ${withNone ? html`<option value="" ${cur ? "" : "selected"}>بدون صورت‌حساب (سفارشی)</option>` : ""}
+    ${v.plans.map((p) => html`<option value="${p.id}" ${cur === p.id ? "selected" : ""}>${p.name}</option>`)}</select>`;
   const hidden = (n: string, val: unknown) => html`<input type="hidden" name="${n}" value="${val}">`;
   const limitInputs = (o: Row) => html`
     <div><label>سقف کاربران</label><input type="number" name="max_users" dir="ltr" min="0" max="1000" value="${o.max_users ?? ""}" placeholder="نامحدود" style="width:7em"></div>
-    <div><label>سقف دستگاه‌ها</label><input type="number" name="max_devices" dir="ltr" min="0" max="1000" value="${o.max_devices ?? ""}" placeholder="نامحدود" style="width:7em"></div>`;
+    <div><label>سقف دستگاه‌ها</label><input type="number" name="max_devices" dir="ltr" min="0" max="1000" value="${o.max_devices ?? ""}" placeholder="نامحدود" style="width:7em"></div>
+    <div><label>سقف کارت فعال</label><input type="number" name="max_cards" dir="ltr" min="0" max="1000" value="${o.max_cards ?? ""}" placeholder="نامحدود" style="width:7em"></div>`;
   const limit = (n: number | null) => (n ? J.fa(n) : "∞");
   return layout(c, "مدیریت سرور · کنترل تردد", html`
 <h1>مدیریت سرور</h1>
@@ -603,7 +686,7 @@ ${v.pending.length ? html`
 <div class="box pendingbox">
   <h2>درخواست‌های ثبت‌نام در انتظار تأیید (${J.fa(v.pending.length)})</h2>
   <div class="scroll"><table>
-  <thead><tr><th>سازمان</th><th>ایمیل</th><th>تلفن</th><th>ثبت</th><th>تأیید با سقف (خالی = نامحدود)</th><th></th></tr></thead>
+  <thead><tr><th>سازمان</th><th>ایمیل</th><th>تلفن</th><th>ثبت</th><th>تأیید با طرح (دورهٔ آزمایشی از همین حالا)</th><th></th></tr></thead>
   <tbody>
   ${v.pending.map((o) => html`
   <tr>
@@ -611,7 +694,7 @@ ${v.pending.length ? html`
     <td class="ltr"><a href="mailto:${o.email}">${o.email}</a></td>
     <td class="ltr"><a href="tel:${o.phone}">${o.phone}</a></td>
     <td class="nowrap mut">${ago(o.created_at)}</td>
-    <td><form method="post" class="row">${csrf(c)}${hidden("action", "approve")}${hidden("org", o.id)}${limitInputs(o)}
+    <td><form method="post" class="row">${csrf(c)}${hidden("action", "approve")}${hidden("org", o.id)}<div>${planSelect(o.plan || "starter", false)}</div>
       <div class="auto"><button class="btn sm">تأیید</button></div></form></td>
     <td class="end"><form class="inline" method="post" onsubmit="return confirm(this.dataset.q)" data-q="درخواست ${o.name} رد و حذف شود؟">${csrf(c)}${hidden("action", "reject")}${hidden("org", o.id)}<button class="btn red sm">رد</button></form></td>
   </tr>`)}
@@ -622,7 +705,7 @@ ${v.pending.length ? html`
 
 <div class="box scroll">
 <table>
-<thead><tr><th>سازمان</th><th>وضعیت</th><th>کاربران</th><th>دستگاه</th><th>کارت</th><th>کلاس</th><th>آخرین تردد</th><th></th></tr></thead>
+<thead><tr><th>سازمان</th><th>وضعیت</th><th>طرح</th><th>کاربران</th><th>دستگاه</th><th>کارت</th><th>کلاس</th><th>آخرین تردد</th><th></th></tr></thead>
 <tbody>
 ${v.orgs.length ? v.orgs.map((o) => {
     const us = v.users.get(o.id) || [];
@@ -630,8 +713,9 @@ ${v.orgs.length ? v.orgs.map((o) => {
 <tr>
   <td><b>${o.name}</b>${o.email || o.phone ? html`<div class="mut ltr" style="font-size:12px">${o.email} ${o.phone}</div>` : ""}</td>
   <td>${o.enabled ? html`<span class="pill ok">فعال</span>` : html`<span class="pill bad">غیرفعال</span>`}</td>
+  <td class="nowrap">${o.plan ? html`${v.plans.find((p) => p.id === o.plan)?.name || o.plan}<div class="mut sm">${STATE_FA[subState(o)]}${o.paid_until ? ` · تا ${jdate(o.paid_until)}` : ""}</div>` : html`<span class="mut">سفارشی</span>`}</td>
   <td class="ltr">${us.length ? us.map((u) => u.username).join("، ") : html`<span class="mut">—</span>`} <span class="mut">(${limit(o.max_users)})</span></td>
-  <td>${J.fa(o.n_devices)} / ${limit(o.max_devices)}</td><td>${J.fa(o.n_cards)}</td><td>${J.fa(o.n_classes)}</td>
+  <td>${J.fa(o.n_devices)} / ${limit(o.max_devices)}</td><td>${J.fa(o.n_cards)} / ${limit(o.max_cards)}</td><td>${J.fa(o.n_classes)}</td>
   <td class="nowrap mut">${ago(o.last_event)}</td>
   <td class="nowrap end">
     <form class="inline" method="post" action="/admin/view">${csrf(c)}${hidden("org", o.id)}<button class="btn sm">ورود به پنل</button></form>
@@ -640,6 +724,11 @@ ${v.orgs.length ? v.orgs.map((o) => {
         <form method="post">${csrf(c)}${hidden("action", "rename")}${hidden("org", o.id)}
           <label>نام سازمان</label><input name="name" value="${o.name}" required>
           <p><button class="btn sm">ذخیره نام</button></p></form>
+        <form method="post" class="row">${csrf(c)}${hidden("action", "set_plan")}${hidden("org", o.id)}
+          <div><label>طرح</label>${planSelect(o.plan, true)}</div>
+          <div><label>روزهای پرداخت‌شده از امروز</label><input type="number" name="days" dir="ltr" min="0" max="3650" placeholder="خالی = بدون سررسید" style="width:9em"></div>
+          <div class="auto"><button class="btn sm">ذخیره طرح</button></div></form>
+        <p class="mut sm">طرح، سقف‌ها را هم تنظیم می‌کند. سقف‌ها را جداگانه هم می‌توانید عوض کنید:</p>
         <form method="post" class="row">${csrf(c)}${hidden("action", "limits")}${hidden("org", o.id)}${limitInputs(o)}
           <div class="auto"><button class="btn sm">ذخیره سقف</button></div></form>
         <form method="post">${csrf(c)}${hidden("action", "toggle")}${hidden("org", o.id)}
@@ -663,9 +752,93 @@ ${v.orgs.length ? v.orgs.map((o) => {
     </details>
   </td>
 </tr>`;
-  }) : html`<tr><td colspan="8" class="mut">هنوز سازمانی ساخته نشده است.</td></tr>`}
+  }) : html`<tr><td colspan="9" class="mut">هنوز سازمانی ساخته نشده است.</td></tr>`}
 </tbody>
 </table>
+</div>
+
+<h2 class="sec-title" id="billing">صورت‌حساب و فروش</h2>
+<p class="mut">پرداخت آنلاین: ${v.payments ? html`<span class="pill ok">زرین‌پال فعال</span>` : html`<span class="pill mut">غیرفعال</span> — secret <span class="mono">ZARINPAL_MERCHANT</span> را تنظیم کنید`}</p>
+
+<div class="box scroll">
+  <h2>فاکتورها</h2>
+  <table class="tbl">
+  <thead><tr><th>شماره</th><th>سازمان</th><th>شرح</th><th>مبلغ</th><th>وضعیت</th><th>تاریخ</th><th></th></tr></thead>
+  <tbody>
+  ${v.invoices.length ? v.invoices.map((i) => html`
+  <tr>
+    <td class="mono">${i.number}</td><td>${i.org_name}</td>
+    <td>${i.kind === "plan" ? `اشتراک ${v.plans.find((p) => p.id === i.item)?.name || i.item}` : i.kind === "hardware" ? html`${i.mode === "rent" ? "اجاره" : "خرید"} ${v.products.find((p) => p.id === i.item)?.name || i.item} × ${J.fa(i.qty)}<div class="mut sm">${i.note}</div>` : i.note || "دستی"}</td>
+    <td class="nowrap">${money(i.total)}</td>
+    <td>${i.status === "paid" ? html`<span class="pill ok">پرداخت شده</span>` : i.status === "pending" ? html`<span class="pill warn">در انتظار</span>` : html`<span class="pill bad">ناموفق</span>`}
+      ${i.ref_id ? html`<div class="mono mut sm">${i.ref_id}</div>` : ""}</td>
+    <td class="nowrap mut">${jdate(i.paid_at || i.created_at)}</td>
+    <td class="nowrap end">
+      ${i.status !== "paid" ? html`<form class="inline" method="post">${csrf(c)}${hidden("action", "invoice_paid")}${hidden("id", i.id)}
+        <input name="ref" placeholder="شمارهٔ واریز" style="width:8em"><button class="btn sec sm">ثبت پرداخت دستی</button></form>` : ""}
+      ${i.kind === "hardware" && i.status === "paid" ? html`<form class="inline" method="post">${csrf(c)}${hidden("action", "invoice_shipped")}${hidden("id", i.id)}
+        <button class="btn ${i.shipped ? "sec" : ""} sm">${i.shipped ? "ارسال شد ✓" : "علامت ارسال"}</button></form>` : ""}
+    </td>
+  </tr>`) : html`<tr><td colspan="7" class="mut">هنوز فاکتوری نیست.</td></tr>`}
+  </tbody></table>
+  <details><summary>صدور فاکتور دستی (مثلاً طرح سازمانی)</summary>
+    <form method="post" class="row">${csrf(c)}${hidden("action", "invoice_new")}
+      <div><label>سازمان</label><select name="org">${v.orgs.map((o) => html`<option value="${o.id}">${o.name}</option>`)}</select></div>
+      <div><label>مبلغ بدون مالیات (تومان)</label><input name="amount" type="number" dir="ltr" min="1000" required></div>
+      <div><label>شرح</label><input name="note" maxlength="200" required></div>
+      <div><label>روزهای اعتبار پس از پرداخت</label><input name="days" type="number" dir="ltr" min="0" max="3650" placeholder="خالی = تمدید نمی‌کند"></div>
+      <div class="auto"><button class="btn">صدور</button></div>
+    </form>
+    <p class="mut sm">مشتری فاکتور را در صفحهٔ صورت‌حساب خود می‌بیند و با زرین‌پال می‌پردازد؛ یا پرداخت کارت‌به‌کارت را این‌جا دستی ثبت کنید.</p>
+  </details>
+</div>
+
+${v.rentals.length ? html`
+<div class="box scroll">
+  <h2>دستگاه‌های اجاره‌ای فعال</h2>
+  <table class="tbl"><tbody>${v.rentals.map((r) => html`<tr><td>${r.org_name}</td><td>${r.name} × ${J.fa(r.qty)}</td><td>${money(r.monthly * r.qty)} / ماه</td><td class="mut">از ${jdate(r.started_at)}</td>
+    <td class="end"><form class="inline" method="post" onsubmit="return confirm('دستگاه بازگردانده شد و اجاره پایان یابد؟')">${csrf(c)}${hidden("action", "rental_end")}${hidden("id", r.id)}<button class="btn sec sm">پایان اجاره</button></form></td></tr>`)}</tbody></table>
+</div>` : ""}
+
+<div class="grid">
+  <div class="box scroll">
+    <h2>طرح‌ها</h2>
+    <p class="mut sm">قیمت‌ها به تومان و بدون مالیات. سقف خالی = نامحدود. ویژگی‌ها هر کدام در یک خط.</p>
+    ${v.plans.map((p) => html`
+    <details><summary>${p.name} · ${p.contact ? "تماس با فروش" : html`${money(p.price_month)} / ماه`}</summary>
+      <form method="post">${csrf(c)}${hidden("action", "plan_save")}${hidden("id", p.id)}
+        <div class="row"><div><label>نام</label><input name="name" value="${p.name}"></div><div><label>توضیح کوتاه</label><input name="blurb" value="${p.blurb}"></div></div>
+        <div class="row">
+          <div><label>ماهانه</label><input name="price_month" type="number" dir="ltr" min="0" value="${p.price_month}"></div>
+          <div><label>سالانه</label><input name="price_year" type="number" dir="ltr" min="0" value="${p.price_year}"></div>
+          <div><label>روز آزمایشی</label><input name="trial_days" type="number" dir="ltr" min="0" max="90" value="${p.trial_days}"></div>
+        </div>
+        <div class="row">
+          <div><label>درب</label><input name="max_doors" type="number" dir="ltr" min="0" value="${p.max_doors ?? ""}" placeholder="∞"></div>
+          <div><label>مدیر</label><input name="max_admins" type="number" dir="ltr" min="0" value="${p.max_admins ?? ""}" placeholder="∞"></div>
+          <div><label>کارت فعال</label><input name="max_cards" type="number" dir="ltr" min="0" value="${p.max_cards ?? ""}" placeholder="∞"></div>
+        </div>
+        <label>ویژگی‌ها</label><textarea name="features" rows="3">${p.features}</textarea>
+        <p><button class="btn sm">ذخیره طرح</button></p>
+      </form>
+    </details>`)}
+  </div>
+  <div class="box scroll">
+    <h2>محصولات سخت‌افزاری</h2>
+    ${v.products.map((p) => html`
+    <details><summary>${p.name} · ${money(p.price)}${p.active ? "" : " (غیرفعال)"}</summary>
+      <form method="post">${csrf(c)}${hidden("action", "product_save")}${hidden("id", p.id)}
+        <div class="row"><div><label>نام</label><input name="name" value="${p.name}"></div><div><label>برچسب</label><input name="badge" value="${p.badge}"></div></div>
+        <label>توضیح</label><input name="blurb" value="${p.blurb}">
+        <div class="row">
+          <div><label>قیمت خرید</label><input name="price" type="number" dir="ltr" min="0" value="${p.price}"></div>
+          <div><label>اجارهٔ ماهانه</label><input name="rent_month" type="number" dir="ltr" min="0" value="${p.rent_month ?? ""}" placeholder="اجاره‌ای نیست"></div>
+        </div>
+        <label class="check"><input type="checkbox" name="active" value="1" ${p.active ? "checked" : ""}> در فروشگاه نمایش داده شود</label>
+        <p><button class="btn sm">ذخیره محصول</button></p>
+      </form>
+    </details>`)}
+  </div>
 </div>
 
 <div class="grid">
@@ -893,6 +1066,333 @@ ${r.refused.length ? html`
 function weekdayOf(iso: string): number {
   const [y, m, d] = J.isoParts(iso);
   return (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
+}
+
+// --- billing: pricing, subscription, store, invoices (SecureEntry pricing & billing designs) ---------
+
+const toman = (n: number | null | undefined) => html`${money(n)} <small>تومان</small>`;
+const CYCLE_FA: Record<string, string> = { month: "پرداخت ماهانه", year: "پرداخت سالانه" };
+const STATE_FA: Record<string, string> = {
+  legacy: "طرح سفارشی", free: "رایگان", trialing: "دوره آزمایشی", active: "فعال", past_due: "سررسید گذشته",
+  suspended: "تعلیق", canceling: "لغو در پایان دوره",
+};
+const INV_STATUS: Record<string, [string, string]> = { paid: ["ok", "پرداخت شده"], pending: ["warn", "در انتظار پرداخت"], failed: ["bad", "ناموفق"] };
+const invStatus = (st: string) => { const [cls, t] = INV_STATUS[st] || ["mut", st]; return html`<span class="pill ${cls}">${t}</span>`; };
+
+/** "۳ درب", "۲ کاربر مدیر"… then the plan's own feature lines. */
+function planLines(p: Row): string[] {
+  const out: string[] = [];
+  if (p.max_doors !== null) out.push(`${J.fa(p.max_doors.toLocaleString("en-US"))} درب`);
+  if (p.max_admins !== null) out.push(`${J.fa(p.max_admins)} کاربر مدیر`);
+  if (p.max_cards !== null) out.push(`${J.fa(p.max_cards.toLocaleString("en-US"))} کارت RFID`);
+  return out.concat(String(p.features || "").split("\n").map((x) => x.trim()).filter(Boolean));
+}
+
+function planCard(p: Row, featured: boolean, action: Safe, cycleToggle: boolean, cycle = "month") {
+  const priceBlock = p.contact ? html`<div class="price"><b>سفارشی</b></div>` : cycleToggle
+    ? html`<div class="price pm"><b>${money(p.price_month)}</b><span>تومان / ماهانه</span></div>
+           <div class="price py"><b>${money(p.price_year)}</b><span>تومان / سالانه</span></div>`
+    : html`<div class="price"><b>${money(cycle === "year" ? p.price_year : p.price_month)}</b><span>تومان / ${cycle === "year" ? "سالانه" : "ماهانه"}</span></div>`;
+  return html`
+<div class="tier ${featured ? "featured" : ""} ${p.contact ? "dark" : ""}" id="plan-${p.id}">
+  ${featured ? html`<span class="ribbon">محبوب‌ترین</span>` : ""}
+  <h3>${p.name}</h3>
+  ${priceBlock}
+  <p class="blurb">${p.blurb}</p>
+  <ul>${planLines(p).map((l) => html`<li>${icon("check")}${l}</li>`)}</ul>
+  ${action}
+</div>`;
+}
+
+function cycleSwitch(id: string) {
+  return html`<label class="cycle" for="${id}"><span class="cm">ماهانه</span><span class="sw"><i></i></span><span class="cy">سالانه <em>۱۷٪ تخفیف</em></span></label>`;
+}
+
+function productCard(p: Row, footer: Safe | string = "") {
+  return html`
+<div class="product">
+  <div class="pimg">${icon(p.id === "android_kit" ? "tablet-screen-button" : p.id === "reader_relay" ? "plug" : "microchip")}</div>
+  <div class="pbody">
+    <div class="ptitle"><h3>${p.name}</h3>${p.badge ? html`<span class="badge">${p.badge}</span>` : ""}</div>
+    <p class="blurb">${p.blurb}</p>
+    <div class="pprice"><b>${money(p.price)} تومان</b>${p.rent_month ? html`<span>یا اجاره ${money(p.rent_month)} / ماهانه</span>` : ""}</div>
+    ${footer}
+  </div>
+</div>`;
+}
+
+const PRICING_FAQ: [string, string][] = [
+  ["آیا می‌توانم از سخت‌افزار خودم استفاده کنم؟", "بله! شما می‌توانید کارتخوان‌های خود را با استفاده از Wemos D1 mini و RC522 بسازید. ما فیرم‌ور رایگان و مستندات کامل ساخت را ارائه می‌دهیم."],
+  ["محدودیت «درب» چیست؟", "هر درب مربوط به یک نقطه دسترسی فیزیکی (یک کارتخوان یا یک تبلت NFC) است. طرح‌های ما تعداد درب‌های فعالی که می‌توانید همزمان مدیریت کنید را محدود می‌کنند."],
+  ["آیا از تاریخ شمسی پشتیبانی می‌کنید؟", "قطعاً. سامانه کاملاً برای محیط‌های سازمانی ایران بومی‌سازی شده و از تقویم جلالی و چیدمان راست‌چین در تمامی گزارش‌ها پشتیبانی می‌کند."],
+  ["پرداخت چطور انجام می‌شود؟", "پرداخت آنلاین با همهٔ کارت‌های بانکی عضو شتاب از طریق درگاه زرین‌پال انجام می‌شود و فاکتور رسمی در پنل صادر می‌شود."],
+];
+
+export function pricingPage(c: PageCtx, v: { plans: Row[]; products: Row[] }) {
+  const action = (p: Row) => {
+    const href = c.user ? "/billing#plans" : `/register?plan=${p.id}`;
+    const label = p.contact ? "تماس با فروش" : p.id === "free" ? "شروع رایگان" : p.trial_days ? `شروع دوره آزمایشی ${J.fa(p.trial_days)} روزه` : "انتخاب طرح";
+    return html`<a class="btn ${p.id === "starter" ? "" : p.contact ? "light" : "ghost"} wide" href="${href}">${label}</a>`;
+  };
+  const jsonld = [{
+    "@context": "https://schema.org", "@type": "Product", name: `${BRAND} — ${SITE_NAME}`, description: SITE_DESC,
+    offers: v.plans.filter((p) => !p.contact).map((p) => ({ "@type": "Offer", name: p.name, price: p.price_month * 10, priceCurrency: "IRR" })),
+  }];
+  return layout(c, `قیمت‌گذاری | ${BRAND}`, html`
+<section class="phero">
+  <h1>کنترل دسترسی مقیاس‌پذیر برای<br><span>هر سازمان مدرن</span></h1>
+  <p class="lead">از یک درب تا سازمان‌های بزرگ. حضور و غیاب، کارت‌ها و دستگاه‌ها را در یک پلتفرم ابری یکپارچه مدیریت کنید.</p>
+</section>
+<section class="pricing">
+  <input type="checkbox" id="yearly" class="cyc-input">
+  ${cycleSwitch("yearly")}
+  <div class="tiers">${v.plans.map((p) => planCard(p, p.id === "starter", action(p), true))}</div>
+</section>
+<section class="hardware" id="hardware">
+  <div class="hwhead">
+    <div><h2>به سخت‌افزار نیاز دارید؟</h2>
+    <p class="lead">پلتفرم ما با بردهای Wemos D1 mini ساخت خودتان یا کیت‌های آماده و تنظیم شدهٔ ما کار می‌کند. متناسب با بودجهٔ خود خرید یا اجاره کنید.</p></div>
+    <a class="btn ghost" href="${c.user ? "/store" : "/register"}">مشاهده همه محصولات</a>
+  </div>
+  <div class="products">${v.products.map((p) => productCard(p))}</div>
+</section>
+<section class="pfaq faq" id="faq">
+  <h2>سوالات متداول</h2>
+  ${PRICING_FAQ.map(([q, a]) => html`<details><summary><h3>${q}</h3></summary><p>${a}</p></details>`)}
+</section>`, {
+    path: "/pricing", jsonld,
+    description: "قیمت طرح‌های سامانهٔ کنترل تردد و حضور و غیاب: رایگان، استارتر، تجاری و سازمانی، با ۱۴ روز آزمایش رایگان؛ خرید یا اجارهٔ کارتخوان RFID و کیت درب اندرویدی.",
+  }, { public: true });
+}
+
+function usageBar(label: string, used: number, max: number | null) {
+  const pct = max ? Math.min(100, Math.round((used / max) * 100)) : 0;
+  return html`
+<div class="usage">
+  <div class="uhead"><span>${label}</span><b>${J.fa(used)} / ${max === null ? "∞" : J.fa(max)}</b></div>
+  <div class="ubar ${pct >= 90 ? "full" : ""}"><i style="width:${max === null ? 0 : pct}%"></i></div>
+</div>`;
+}
+
+function invoiceRows(c: PageCtx, rows: Row[]) {
+  return rows.length ? rows.map((i) => html`
+<tr>
+  <td class="mono">${i.number}</td>
+  <td class="nowrap">${jday(i.paid_at || i.created_at)}</td>
+  <td class="nowrap">${money(i.total)} تومان</td>
+  <td>${invStatus(i.status)}</td>
+  <td class="end nowrap">
+    ${i.status === "pending" ? html`<form class="inline" method="post" action="/billing/invoices/${i.id}/pay">${csrf(c)}<button class="btn sm">پرداخت</button></form>` : ""}
+    <a class="btn sec sm" href="/billing/invoices/${i.id}">مشاهده</a>
+  </td>
+</tr>`) : html`<tr><td colspan="5" class="mut">هنوز فاکتوری صادر نشده است.</td></tr>`;
+}
+
+export function billingPage(c: PageCtx, v: {
+  org: Row; plan: Row | null; plans: Row[]; state: string; usage: { doors: number; admins: number; cards: number };
+  invoices: Row[]; rentals: Row[]; next: Quote | null; nextPlan: Row | null; payments: boolean; vat: number; daysLeft: number; cycle: string;
+}) {
+  const o = v.org, st = v.state;
+  const banner = (cls: string, ic: string, title: string, text: string, action: Safe | string) => html`
+<div class="banner ${cls}">
+  <div class="bicon">${icon(ic)}</div>
+  <div class="btext"><h4>${title}</h4><p>${text}</p></div>
+  ${action}
+</div>`;
+  const choose = html`<a class="btn light" href="#plans">انتخاب طرح</a>`;
+  const renewForm = (label: string, cls = "btn") => v.nextPlan ? html`
+<form method="post" action="/billing/checkout" class="inline">${csrf(c)}
+  <input type="hidden" name="plan" value="${v.nextPlan.id}"><input type="hidden" name="cycle" value="${o.cycle || "month"}">
+  <button class="${cls}">${label}</button></form>` : "";
+  const top =
+    st === "trialing" ? banner("brand", "rocket", `${J.fa(v.daysLeft)} روز تا پایان دوره آزمایشی باقی مانده`,
+      `دوره آزمایشی شما در تاریخ ${jday(o.paid_until)} پایان می‌یابد. برای جلوگیری از قطع سرویس، طرح خود را ارتقا دهید.`, choose)
+    : st === "past_due" ? banner("warn", "bell", "پرداخت اشتراک سررسید گذشته است",
+      `دورهٔ شما ${jday(o.paid_until)} تمام شد. درها تا ${J.fa(3)} روز پس از آن کار می‌کنند؛ برای جلوگیری از قطع، تمدید کنید.`, renewForm("تمدید و پرداخت", "btn light"))
+    : st === "suspended" ? banner("bad", "credit-card", "اشتراک تعلیق شده است",
+      "کارت‌ها روی درها پذیرفته نمی‌شوند و نمایشگرها پیام تعلیق نشان می‌دهند. با تمدید، همه چیز بلافاصله فعال می‌شود.", renewForm("تمدید و فعال‌سازی", "btn light"))
+    : st === "canceling" ? banner("muted", "calendar-check", "اشتراک لغو شده است",
+      `تا ${jday(o.paid_until)} همهٔ امکانات فعال است و پس از آن به طرح رایگان می‌روید.`,
+      html`<form method="post" action="/billing/resume" class="inline">${csrf(c)}<button class="btn light">ادامهٔ اشتراک</button></form>`)
+    : st === "legacy" ? banner("muted", "user-shield", "طرح سفارشی", "صورت‌حساب این سازمان توسط مدیر سرور تنظیم می‌شود. برای جابه‌جایی به یکی از طرح‌های زیر می‌توانید یکی را انتخاب کنید.", choose)
+    : "";
+  const planName = v.plan ? v.plan.name : "سفارشی";
+  const maxOf = (k: string, legacy: number | null) => (v.plan ? v.plan[k] : legacy);
+  const nextBox = v.next && v.nextPlan ? html`
+  <div class="box nextpay">
+    <div>
+      <h3 class="cap">پرداخت بعدی</h3>
+      <p class="big">${money(v.next.total)} <small>تومان</small></p>
+      <p class="mut">سررسید: ${jday(o.paid_until)}${v.nextPlan.id !== o.plan ? html` · طرح «${v.nextPlan.name}»` : ""}</p>
+      <p class="mut sm vatline">${icon("file-invoice")} شامل ${J.fa(v.vat)}٪ مالیات بر ارزش افزوده${v.next.rentals ? html` و ${money(v.next.rentals)} تومان اجارهٔ دستگاه` : ""}</p>
+    </div>
+    <div class="nextact">
+      ${renewForm(st === "trialing" ? "پرداخت و فعال‌سازی" : "تمدید زودهنگام", "btn line wide")}
+      ${st === "active" || st === "trialing" ? html`<form method="post" action="/billing/cancel" onsubmit="return confirm(this.dataset.q)" data-q="اشتراک در پایان دوره لغو شود؟">${csrf(c)}<button class="linkbtn">لغو اشتراک</button></form>` : ""}
+    </div>
+  </div>` : html`
+  <div class="box nextpay">
+    <div>
+      <h3 class="cap">پرداخت بعدی</h3>
+      <p class="big">—</p>
+      <p class="mut">${st === "free" ? "طرح رایگان هزینه‌ای ندارد." : st === "canceling" ? "پس از پایان دوره پرداختی نخواهید داشت." : "صورت‌حساب به‌صورت دستی صادر می‌شود."}</p>
+    </div>
+  </div>`;
+  const pendingManual = v.invoices.filter((i) => i.status === "pending");
+  const planAction = (p: Row) => {
+    if (p.contact) return html`<form method="post" action="/billing/checkout">${csrf(c)}<input type="hidden" name="plan" value="${p.id}"><button class="btn light wide">تماس با فروش</button></form>`;
+    const current = o.plan === p.id && (p.id === "free" || (o.cycle || "month") === v.cycle);
+    const label = current ? (st === "trialing" || st === "past_due" || st === "suspended" ? "پرداخت این طرح" : p.id === "free" ? "طرح فعلی" : "تمدید")
+      : p.id === "free" ? "رفتن به رایگان" : "انتخاب";
+    if (current && p.id === "free") return html`<button class="btn ghost wide" disabled>طرح فعلی</button>`;
+    return html`<form method="post" action="/billing/checkout">${csrf(c)}
+      <input type="hidden" name="plan" value="${p.id}"><input type="hidden" name="cycle" value="${v.cycle}">
+      <button class="btn ${p.id === "starter" ? "" : "ghost"} wide">${label}</button></form>`;
+  };
+  return layout(c, "صورت‌حساب · " + BRAND, html`
+${top}
+${pendingManual.length ? html`<div class="flash warn">${J.fa(pendingManual.length)} فاکتور در انتظار پرداخت دارید. <a href="/billing/invoices/${pendingManual[0].id}">مشاهده و پرداخت</a></div>` : ""}
+${!v.payments ? html`<div class="flash warn">پرداخت آنلاین هنوز فعال نشده است؛ برای تمدید یا خرید با پشتیبانی تماس بگیرید.</div>` : ""}
+<div class="bgrid">
+  <div class="box curplan">
+    <div class="cphead">
+      <div>
+        <h3 class="cap">اشتراک فعلی</h3>
+        <div class="cpname"><span>طرح ${planName}</span><span class="tag">${st === "trialing" ? "دوره آزمایشی" : st === "free" || st === "legacy" ? STATE_FA[st] : CYCLE_FA[o.cycle || "month"]}</span>
+          ${st === "past_due" || st === "suspended" ? html`<span class="pill bad">${STATE_FA[st]}</span>` : ""}</div>
+      </div>
+      <a class="lnk" href="#plans">تغییر طرح</a>
+    </div>
+    <div class="usages">
+      ${usageBar("درب‌ها", v.usage.doors, maxOf("max_doors", o.max_devices))}
+      ${usageBar("مدیران", v.usage.admins, maxOf("max_admins", o.max_users))}
+      ${usageBar("کارت‌های فعال", v.usage.cards, maxOf("max_cards", o.max_cards))}
+    </div>
+    ${o.next_plan && o.next_plan !== o.plan ? html`<p class="mut sm">از تمدید بعدی طرح شما «${v.plans.find((p) => p.id === o.next_plan)?.name || o.next_plan}» می‌شود.</p>` : ""}
+  </div>
+  ${nextBox}
+</div>
+
+<div class="box">
+  <div class="boxhead"><h2>فاکتورهای اخیر</h2><a class="lnk" href="/billing/invoices">مشاهده همه</a></div>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>شماره فاکتور</th><th>تاریخ</th><th>مبلغ</th><th>وضعیت</th><th class="end">عملیات</th></tr></thead>
+    <tbody>${invoiceRows(c, v.invoices)}</tbody>
+  </table></div>
+</div>
+
+${v.rentals.length ? html`
+<div class="box">
+  <h2>دستگاه‌های اجاره‌ای</h2>
+  <table class="tbl"><tbody>${v.rentals.map((r) => html`<tr><td>${r.name}</td><td>${J.fa(r.qty)} عدد</td><td>${money(r.monthly * r.qty)} تومان / ماهانه</td><td class="mut">از ${jday(r.started_at)}</td></tr>`)}</tbody></table>
+  <p class="mut sm">اجاره هر ماه به تمدید اشتراک اضافه می‌شود. برای بازگرداندن دستگاه با پشتیبانی تماس بگیرید.</p>
+</div>` : ""}
+
+<section class="box" id="plans">
+  <div class="boxhead"><h2>انتخاب طرح</h2>
+    <div class="seg"><a href="?cycle=month#plans" class="${v.cycle === "month" ? "on" : ""}">ماهانه</a><a href="?cycle=year#plans" class="${v.cycle === "year" ? "on" : ""}">سالانه <em>۱۷٪ تخفیف</em></a></div>
+  </div>
+  <div class="tiers inpanel">${v.plans.map((p) => planCard(p, o.plan === p.id, planAction(p), false, v.cycle))}</div>
+  <p class="mut sm">مبالغ بدون ${J.fa(v.vat)}٪ مالیات بر ارزش افزوده است. در ارتقا، روزهای استفاده‌نشدهٔ طرح فعلی از مبلغ کم می‌شود؛ کاهش طرح از تمدید بعدی اعمال می‌شود.</p>
+</section>
+
+<div class="hwcta">
+  <div class="hwicon">${icon("microchip")}</div>
+  <div class="hwtext"><h3>تعداد درب‌ها کافی نیست؟</h3><p>کارتخوان‌های تنظیم شده و کیت‌های رله را از فروشگاه ما سفارش دهید. ارسال سریع به دفتر شما.</p></div>
+  <a class="btn dark" href="/store">بازدید از فروشگاه</a>
+</div>`, undefined, { heading: "بررسی صورت‌حساب" });
+}
+
+export function checkoutPage(c: PageCtx, v: { plan: Row; cycle: string; q: Quote; vat: number; payments: boolean }) {
+  const KIND: Record<string, string> = { renew: "تمدید", upgrade: "ارتقای طرح", start: "شروع اشتراک", downgrade: "کاهش طرح" };
+  const line = (label: string, val: Safe | string) => html`<tr><th>${label}</th><td class="end">${val}</td></tr>`;
+  return layout(c, "پرداخت · " + BRAND, html`
+<div class="pagehead"><h1>${KIND[v.q.kind]}: طرح ${v.plan.name}</h1></div>
+<div class="box checkout">
+  <table class="tbl">
+    ${line(`طرح ${v.plan.name} (${CYCLE_FA[v.cycle]})`, html`${money(v.cycle === "year" ? v.plan.price_year : v.plan.price_month)} تومان`)}
+    ${v.q.rentals ? line("اجارهٔ دستگاه‌ها", html`${money(v.q.rentals)} تومان`) : ""}
+    ${v.q.credit ? line("اعتبار روزهای باقی‌ماندهٔ طرح فعلی", html`−${money(v.q.credit)} تومان`) : ""}
+    ${line(`مالیات بر ارزش افزوده (${J.fa(v.vat)}٪)`, html`${money(v.q.vat)} تومان`)}
+    <tr class="total"><th>مبلغ قابل پرداخت</th><td class="end">${money(v.q.total)} تومان</td></tr>
+  </table>
+  <p class="mut">دورهٔ جدید: ${jday(v.q.periodStart)} تا ${jday(v.q.periodEnd)}</p>
+  <form method="post" action="/billing/checkout" class="row">${csrf(c)}
+    <input type="hidden" name="plan" value="${v.plan.id}"><input type="hidden" name="cycle" value="${v.cycle}"><input type="hidden" name="confirm" value="1">
+    <div class="auto"><button class="btn big" ${v.payments ? "" : "disabled"}>${icon("credit-card")} پرداخت با زرین‌پال</button></div>
+    <div class="auto"><a class="btn sec big" href="/billing#plans">انصراف</a></div>
+  </form>
+</div>`);
+}
+
+export function storePage(c: PageCtx, v: { products: Row[]; orders: Row[]; rentals: Row[]; canRent: boolean; payments: boolean; vat: number }) {
+  const form = (p: Row) => html`
+<form method="post" action="/store/order" class="order">${csrf(c)}
+  <input type="hidden" name="product" value="${p.id}">
+  <div class="modes">
+    <label class="check"><input type="radio" name="mode" value="buy" checked> خرید · ${money(p.price)} تومان</label>
+    ${p.rent_month ? html`<label class="check ${v.canRent ? "" : "mut"}"><input type="radio" name="mode" value="rent" ${v.canRent ? "" : "disabled"}> اجاره · ${money(p.rent_month)} تومان / ماهانه</label>` : ""}
+  </div>
+  <details><summary class="btn wide">سفارش</summary>
+    <label>تعداد</label><input name="qty" type="number" dir="ltr" min="1" max="20" value="1">
+    <label>نشانی کامل، کد پستی و نام گیرنده</label><textarea name="address" rows="3" required minlength="10" maxlength="400"></textarea>
+    <p><button class="btn wide" ${v.payments ? "" : "disabled"}>پرداخت با زرین‌پال</button></p>
+    <p class="mut sm">به مبلغ ${J.fa(v.vat)}٪ مالیات بر ارزش افزوده اضافه می‌شود.${p.rent_month ? " اجاره از ماه دوم به تمدید اشتراک اضافه می‌شود." : ""}</p>
+  </details>
+</form>`;
+  return layout(c, "فروشگاه سخت‌افزار · " + BRAND, html`
+<p class="mut">کیت‌های آماده و برنامه‌ریزی‌شده برای درب‌های شما. پس از پرداخت، سفارش ظرف ۳ روز کاری ارسال می‌شود.${v.canRent ? "" : " اجاره فقط همراه یک اشتراک پولی فعال ممکن است."}</p>
+${!v.payments ? html`<div class="flash warn">پرداخت آنلاین هنوز فعال نشده است؛ برای سفارش با پشتیبانی تماس بگیرید.</div>` : ""}
+<div class="products">${v.products.map((p) => productCard(p, form(p)))}</div>
+${v.orders.length || v.rentals.length ? html`
+<div class="box">
+  <h2>سفارش‌های شما</h2>
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>فاکتور</th><th>محصول</th><th>نوع</th><th>تاریخ</th><th>ارسال</th></tr></thead>
+    <tbody>${v.orders.map((o) => html`<tr><td class="mono"><a href="/billing/invoices/${o.id}">${o.number}</a></td><td>${o.name} × ${J.fa(o.qty)}</td>
+      <td>${o.mode === "rent" ? "اجاره" : "خرید"}</td><td>${jday(o.paid_at)}</td><td>${o.shipped ? html`<span class="pill ok">ارسال شد</span>` : html`<span class="pill warn">در حال آماده‌سازی</span>`}</td></tr>`)}</tbody>
+  </table></div>
+</div>` : ""}`, undefined, { heading: "فروشگاه سخت‌افزار" });
+}
+
+export function invoicesPage(c: PageCtx, v: { rows: Row[] }) {
+  return layout(c, "فاکتورها · " + BRAND, html`
+<div class="pagehead"><h1>فاکتورها</h1><a class="btn sec" href="/billing">بازگشت به صورت‌حساب</a></div>
+<div class="box scroll"><table class="tbl">
+  <thead><tr><th>شماره فاکتور</th><th>تاریخ</th><th>مبلغ</th><th>وضعیت</th><th class="end">عملیات</th></tr></thead>
+  <tbody>${invoiceRows(c, v.rows)}</tbody>
+</table></div>`);
+}
+
+export function invoicePage(c: PageCtx, v: { inv: Row; org: Row; itemName: string; vat: number }) {
+  const i = v.inv;
+  const desc = i.kind === "plan" ? `اشتراک طرح ${v.itemName} (${CYCLE_FA[i.cycle || "month"]})`
+    : i.kind === "hardware" ? `${i.mode === "rent" ? "اجارهٔ ماه اول" : "خرید"} ${v.itemName}` : (i.note || "فاکتور دستی");
+  const line = (label: string, val: Safe | string) => html`<tr><th>${label}</th><td class="end">${val}</td></tr>`;
+  return layout(c, `فاکتور ${i.number} · ${BRAND}`, html`
+<div class="pagehead noprint"><h1>فاکتور ${i.number}</h1>
+  <div class="row auto">
+    ${i.status === "pending" ? html`<form class="inline" method="post" action="/billing/invoices/${i.id}/pay">${csrf(c)}<button class="btn">پرداخت با زرین‌پال</button></form>` : ""}
+    <button class="btn sec" onclick="print()">چاپ</button>
+    <a class="btn sec" href="/billing/invoices">همه فاکتورها</a>
+  </div>
+</div>
+<div class="box invoice">
+  <div class="invhead">
+    <div><span class="pbrand">${logo()}<b>${BRAND}</b></span><p class="mut sm">صورتحساب فروش کالا و خدمات</p></div>
+    <div class="end"><p class="mono">${i.number}</p><p>${jday(i.paid_at || i.created_at)}</p>${invStatus(i.status)}</div>
+  </div>
+  <p><b>خریدار:</b> ${v.org.name}${v.org.email ? html` · <span class="ltr">${v.org.email}</span>` : ""}${v.org.phone ? html` · <span class="ltr">${v.org.phone}</span>` : ""}</p>
+  <table class="tbl">
+    ${line(`${desc}${i.qty > 1 ? ` × ${J.fa(i.qty)}` : ""}`, html`${money(i.amount + i.credit)} تومان`)}
+    ${i.credit ? line("اعتبار طرح قبلی", html`−${money(i.credit)} تومان`) : ""}
+    ${line("مالیات بر ارزش افزوده", html`${money(i.vat)} تومان`)}
+    <tr class="total"><th>جمع کل</th><td class="end">${money(i.total)} تومان</td></tr>
+  </table>
+  ${i.period_end && i.kind !== "hardware" ? html`<p class="mut">اعتبار تا ${jday(i.period_end)}</p>` : ""}
+  ${i.kind === "hardware" ? html`<p class="mut">نشانی ارسال: ${i.note}</p>` : ""}
+  ${i.status === "paid" ? html`<p class="mut">کد پیگیری زرین‌پال: <span class="mono">${i.ref_id || "—"}</span>${i.card_pan ? html` · کارت <span class="mono">${i.card_pan}</span>` : ""}</p>` : ""}
+</div>`);
 }
 
 export function errorPage(status: number, message: string) {
