@@ -174,7 +174,7 @@ class KioskActivity : Activity(), NfcAdapter.ReaderCallback, Door.Listener {
         if (now - cornerFirstTapMs > 3000) { cornerFirstTapMs = now; cornerTaps = 0 }
         if (++cornerTaps >= 5) {
             cornerTaps = 0
-            PinDialog.ask(this, prefs.pin) { startActivity(Intent(this, SettingsActivity::class.java)) }
+            AdminGate.ask(this, prefs) { startActivity(Intent(this, SettingsActivity::class.java)) }
         }
     }
 

@@ -26,12 +26,15 @@ and you can disable it or give it a new key. A phone has no relay, so **Open** f
    (every build of `main` is published under **Releases**).
    You can also build it with Android Studio, or run `./gradlew assembleRelease` in `android/` (needs the Android SDK).
 2. Copy the APK to the phone and install it. Allow "install unknown apps" if Android asks.
-3. On the server, open **Doors → New door** and copy the key.
-4. Open the app and enter:
-   - **Server address**: e.g. `http://192.168.1.10:8080` (Flask), or `https://accessctl.<you>.workers.dev`,
-   - **Door key**: the key from step 3,
-   - **Admin PIN**: needed to leave the kiosk screen (strongly recommended).
-5. Tap **Save and start**. The app checks the key with the server and switches to the kiosk screen.
+3. Open the app and **sign in with a company admin's username and password** (the same account as the web panel).
+   The server is preset to the SecureEntry cloud; tap **Change** to use another `https://accessctl.<you>.workers.dev`.
+4. **Choose this phone's door** from your company's doors, or create a new one (counts toward your plan's door limit).
+   There is no door key to copy: the server hands the key to the app (`POST /api/v1/app/login`).
+5. Choose the kiosk options and tap **Save and start**.
+
+From then on the settings open only after an admin of the same company signs in again (the server checks the
+password through `POST /api/v1/app/unlock`; without a connection, the password of the admin who paired the phone works).
+Sign-in from the app needs the Cloudflare server; the Flask server only supports older app versions with a door key.
 
 The server needs this version or newer: the app calls `GET /api/v1/kiosk` to get the door's live-screen link.
 
@@ -53,7 +56,7 @@ adb shell dpm set-device-owner com.accessctl.door/.AdminReceiver
 
 Then open the app once and set it up. Keep the phone on a USB charger.
 
-**Leaving the kiosk screen:** tap the **top-right corner 5 times** quickly and enter the admin PIN. The settings screen opens.
+**Leaving the kiosk screen:** tap the **top-right corner 5 times** quickly and sign in as a company admin. The settings screen opens.
 From there, **Exit kiosk mode** returns the phone to its normal launcher until you open the app again.
 **Remove device owner** is needed before you can uninstall the app.
 
@@ -86,8 +89,11 @@ From there, **Exit kiosk mode** returns the phone to its normal launcher until y
 1. دانلود APK: https://github.com/Aryalleh/Attendance-device/releases/latest/download/door-kiosk.apk
    (هر ساخت از شاخهٔ `main` در بخش **Releases** منتشر می‌شود).
 2. APK را روی گوشی نصب کنید.
-3. در پنل سرور **درها ← در جدید** را بزنید و کلید را کپی کنید.
-4. برنامه را باز کنید و **آدرس سرور**، **کلید در** و **رمز مدیر** را وارد کنید و **ذخیره و شروع** را بزنید.
+3. برنامه را باز کنید و **با نام کاربری و رمز یکی از مدیران سازمان** (همان حساب پنل) وارد شوید.
+4. **در این گوشی را انتخاب کنید** یا در جدید بسازید؛ کلید در لازم نیست و برنامه آن را خودش از سرور می‌گیرد.
+5. گزینه‌های حالت نمایشگر را انتخاب و **ذخیره و شروع** را بزنید.
+
+از آن پس تنظیمات فقط با ورود دوبارهٔ یکی از مدیران همان سازمان باز می‌شود (بدون اینترنت، رمز مدیری که گوشی را وصل کرده کار می‌کند).
 
 ### حالت کیوسک کامل (پیشنهادی)
 
@@ -101,7 +107,7 @@ adb shell dpm set-device-owner com.accessctl.door/.AdminReceiver
 پس از این کار گوشی هنگام روشن شدن مستقیم وارد نمایشگر می‌شود، دکمه‌های Home و Recents کار نمی‌کنند و نوار وضعیت و قفل صفحه غیرفعال می‌شوند.
 بدون این مرحله، برنامه را به‌عنوان **Home** پیش‌فرض انتخاب کنید و پیام «سنجاق کردن برنامه» را تأیید کنید.
 
-**خروج از نمایشگر:** گوشهٔ **بالا-راست** صفحه را ۵ بار پشت سر هم لمس کنید و رمز مدیر را وارد کنید.
+**خروج از نمایشگر:** گوشهٔ **بالا-راست** صفحه را ۵ بار پشت سر هم لمس کنید و با حساب مدیر سازمان وارد شوید.
 گزینهٔ **خروج از حالت نمایشگر** گوشی را به حالت عادی برمی‌گرداند. پیش از حذف برنامه، **حذف «مالک دستگاه»** را بزنید.
 
 </div>

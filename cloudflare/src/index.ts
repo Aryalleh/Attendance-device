@@ -344,6 +344,78 @@ async function apiKiosk(c: Ctx) {
   });
 }
 
+// --- Android door app: sign in with a company admin's username and password (no door key to type) ---
+
+/** A company admin from the JSON body, or null (after a short delay, like the login page). */
+async function appUser(c: Ctx, body: any): Promise<Row | null> {
+  const name = String(body?.username ?? "").trim();
+  const pw = String(body?.password ?? "");
+  const u = name && pw ? await first(c.db,
+    `SELECT u.*, o.enabled AS org_enabled, o.approved AS org_approved FROM users u LEFT JOIN orgs o ON o.id = u.org_id
+     WHERE u.username IN (?, ?) ORDER BY u.username = ? DESC LIMIT 1`, name, name.toLowerCase(), name) : null;
+  if (u && (await checkPassword(u.pw_hash, pw))) return u;
+  await new Promise((r) => setTimeout(r, 1000));
+  return null;
+}
+
+/**
+ * POST {username, password}                → the company's doors, to choose one
+ * POST {username, password, door: id}      → that door's key (the app stores it; the user never sees it)
+ * POST {username, password, door: "new", name} → a new door and its key
+ */
+async function appLogin(c: Ctx) {
+  const body: any = await c.req.json().catch(() => ({}));
+  const u = await appUser(c, body);
+  if (!u) return json({ error: "bad_login", message: "نام کاربری یا رمز عبور اشتباه است." }, 401);
+  if (u.org_id === null) return json({ error: "owner", message: "با حساب مدیر سازمان وارد شوید، نه مدیر سرور." }, 403);
+  if (!u.org_enabled) return json({ error: "disabled", message: "حساب سازمان شما غیرفعال شده است." }, 403);
+  if (!u.org_approved) return json({ error: "pending", message: "سازمان شما هنوز تأیید نشده است." }, 403);
+  const org = (await first(c.db, `SELECT o.*, p.name AS plan_name, ${B.orgLiveSql("o")} AS live FROM orgs o LEFT JOIN plans p ON p.id = o.plan WHERE o.id = ?`, u.org_id))!;
+  const doors = await all(c.db, "SELECT id, name, key, last_seen, fw, enabled FROM devices WHERE org_id = ? ORDER BY name", u.org_id);
+  const canAdd = org.max_devices === null || doors.length < org.max_devices;
+  const door = body?.door;
+
+  if (door === undefined || door === null || door === "") {
+    const cutoff = now() - ONLINE_WINDOW;
+    return json({
+      org: { name: org.name, plan: org.plan_name || "", active: Boolean(org.live) },
+      user: u.username,
+      doors: doors.map((d) => ({
+        id: d.id, name: d.name, enabled: Boolean(d.enabled),
+        online: Boolean(d.last_seen && d.last_seen >= cutoff), android: String(d.fw || "").startsWith("android"),
+      })),
+      can_add: canAdd, max_doors: org.max_devices,
+    });
+  }
+  if (door === "new") {
+    const name = cleanName(body?.name) || "در اندروید";
+    if (!canAdd) {
+      return json({ error: "limit", message: org.plan
+        ? `سقف درها در طرح فعلی شما ${J.fa(org.max_devices)} است. طرح را در پنل ارتقا دهید یا یکی از درهای موجود را انتخاب کنید.`
+        : `سقف درهای سازمان شما ${J.fa(org.max_devices)} است.` }, 403);
+    }
+    const key = randomToken(18);
+    try {
+      await run(c.db, "INSERT INTO devices(org_id, name, key, direction, open_ms, enabled) VALUES (?, ?, ?, 'toggle', 3000, 1)", u.org_id, name, key);
+    } catch (e) {
+      if (!isUniqueError(e)) throw e;
+      return json({ error: "name_taken", message: "دری با این نام وجود دارد." }, 409);
+    }
+    return json({ key, name, org: org.name });
+  }
+  const d = doors.find((x) => x.id === Number(door));
+  if (!d) return json({ error: "no_door", message: "این در پیدا نشد." }, 404);
+  return json({ key: d.key, name: d.name, org: org.name });
+}
+
+/** Unlocking the app's settings: any admin of the door's company may (X-Device-Key + {username, password}). */
+async function appUnlock(c: Ctx) {
+  const dev = await deviceFromKey(c);
+  const u = await appUser(c, await c.req.json().catch(() => ({})));
+  if (!u || u.org_id !== dev.org_id) return json({ ok: false, error: "bad_login" }, 401);
+  return json({ ok: true, user: u.username });
+}
+
 // --- integration API (read-only, Bearer token, all companies; ?org=<id> to filter) -----
 
 async function apiPresence(c: Ctx) {
@@ -1484,6 +1556,8 @@ route("POST", "/api/v1/scan", "api_scan", apiScan, "none");
 route("POST", "/api/v1/sync", "api_sync", apiSync, "none");
 route("GET", "/api/v1/cards", "api_cards", apiCards, "none");
 route("GET", "/api/v1/kiosk", "api_kiosk", apiKiosk, "none");
+route("POST", "/api/v1/app/login", "api_app_login", appLogin, "none");
+route("POST", "/api/v1/app/unlock", "api_app_unlock", appUnlock, "none");
 route("GET", "/api/v1/presence", "api_presence", apiPresence, "none");
 route("GET", "/api/v1/events", "api_events", apiEvents, "none");
 route("GET,POST", "/login", "login", login, "none");

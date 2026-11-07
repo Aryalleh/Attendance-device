@@ -1,31 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Door Kiosk</string>
-    <string name="settings_title">Door setup</string>
 
     <string name="server_url">Server address</string>
     <string name="server_url_hint">http://192.168.1.10:8080 or https://….workers.dev</string>
-    <string name="door_key">Door key</string>
-    <string name="door_key_hint">From the server panel: Doors → new door / new key</string>
-    <string name="admin_pin">Admin PIN (to leave the kiosk screen)</string>
-    <string name="admin_pin_hint">Digits only; empty = no PIN</string>
     <string name="lock_task">Lock the phone to the kiosk screen</string>
     <string name="auto_start">Open the kiosk screen automatically after boot</string>
     <string name="save">Save and start</string>
     <string name="exit_kiosk">Exit kiosk mode</string>
     <string name="remove_owner">Remove device owner (needed before uninstalling)</string>
-    <string name="testing">Connecting to the server…</string>
-    <string name="connected">Connected — door: %1$s</string>
     <string name="conn_failed">Could not connect: %1$s</string>
     <string name="bad_key">The server rejected this door key.</string>
-    <string name="fill_in">Enter the server address and the door key.</string>
     <string name="owner_on">Device owner: yes — full lock-down is active.</string>
     <string name="owner_off">Device owner: no — Android will ask once to pin the screen. See README for full lock-down.</string>
     <string name="owner_removed">Device owner removed. You can uninstall the app now.</string>
 
     <string name="pin_title">Admin PIN</string>
     <string name="pin_wrong">Wrong PIN</string>
-    <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
 
     <string name="ready">Hold your card near the phone</string>
@@ -57,21 +48,52 @@
     <string name="pin_locked">Too many wrong tries. Try again in %1$d s.</string>
     <string name="setup_brand">SecureEntry Door</string>
     <string name="setup_title">Turn this phone into a door</string>
-    <string name="setup_lead">Connect it to your company once. After that it opens straight to the kiosk screen.</string>
-    <string name="step_connect">Connect to server</string>
-    <string name="step_pin">Set admin PIN</string>
+    <string name="setup_lead">Sign in once with your company admin account and pick this phone\'s door. After that it opens straight to the door screen.</string>
     <string name="step_kiosk">Kiosk mode</string>
     <string name="step_of">Step %1$d of 3</string>
-    <string name="connect_title">Connect to your company</string>
-    <string name="connect_lead">In the SecureEntry panel open Doors → New door, then type the server address and the door key shown there.</string>
-    <string name="test_conn">Check connection</string>
     <string name="connected_full">Connected: %1$s</string>
-    <string name="pin_set_title">Set an admin PIN</string>
-    <string name="pin_set_lead">The PIN is needed to leave the kiosk screen or change these settings. Digits only; leave empty for no PIN.</string>
-    <string name="pin_repeat">Repeat PIN</string>
-    <string name="pin_mismatch">The two PINs are not the same.</string>
     <string name="kiosk_title">Kiosk mode</string>
     <string name="kiosk_lead">Lock the phone to the door screen and open it automatically after a restart.</string>
     <string name="next">Continue</string>
     <string name="back">Back</string>
+    <string name="step_login">Admin sign-in</string>
+    <string name="step_door">Choose door</string>
+    <string name="login_title">Sign in to your company</string>
+    <string name="login_lead">Use the username and password of a company admin from the SecureEntry panel. No door key needed.</string>
+    <string name="login_note">The same account is needed later to open these settings or leave the door screen.</string>
+    <string name="server_short">Server</string>
+    <string name="change">Change</string>
+    <string name="username">Username</string>
+    <string name="username_hint">e.g. admin@company.com</string>
+    <string name="password">Password</string>
+    <string name="show_password">Show password</string>
+    <string name="hide_password">Hide password</string>
+    <string name="sign_in">Sign in</string>
+    <string name="signing_in">Signing in…</string>
+    <string name="checking">Checking…</string>
+    <string name="need_username">Enter the username.</string>
+    <string name="need_password">Enter the password.</string>
+    <string name="server_old">This server doesn\'t support sign-in from the app yet (HTTP 404). Check the address.</string>
+    <string name="door_title">Which door is this phone?</string>
+    <string name="door_lead">Doors of %1$s. Pick one, or add a new door for this phone.</string>
+    <string name="door_online">Online</string>
+    <string name="door_offline">Offline</string>
+    <string name="door_android">Android</string>
+    <string name="door_disabled_short">Disabled</string>
+    <string name="new_door">New door</string>
+    <string name="new_door_sub">Create a door for this phone</string>
+    <string name="new_door_limit">Your plan has no room for another door — upgrade in the panel or pick an existing one.</string>
+    <string name="new_door_name">Door name</string>
+    <string name="new_door_hint">e.g. Main entrance</string>
+    <string name="new_door_default">Android door</string>
+    <string name="need_door_name">Enter a name for the door.</string>
+    <string name="door_note">The phone keeps the door\'s key itself; you never have to copy it.</string>
+    <string name="door_in_use">This door is online on another device right now. Both will report scans as this door.</string>
+    <string name="lock_task_sub">Keeps the phone on the door screen; Home and Back don\'t leave it.</string>
+    <string name="auto_start_sub">Opens the door screen when the phone turns on.</string>
+    <string name="paired_as">Door: %1$s\nCompany: %2$s\nPaired by: %3$s</string>
+    <string name="change_pairing">Change door or account</string>
+    <string name="gate_title">Admin sign-in</string>
+    <string name="gate_sub">Sign in as an admin of %1$s to open the settings.</string>
+    <string name="gate_wrong">Wrong username or password.</string>
 </resources>

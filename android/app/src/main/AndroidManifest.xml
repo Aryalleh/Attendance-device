@@ -43,7 +43,7 @@
             android:name=".SettingsActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize"
-            android:theme="@android:style/Theme.Material.Light.DarkActionBar" />
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
 
         <receiver
             android:name=".BootReceiver"
