@@ -49,4 +49,29 @@
     <string name="try_again">اتصال شبکه را بررسی کنید و دوباره امتحان کنید</string>
     <string name="card_not_checked">کارت بررسی نشد</string>
     <string name="not_member">عضو این کلاس نیستید</string>
+
+    <!-- setup wizard and PIN keypad (SecureEntry Kiosk 00 Setup / 11 PIN exit) -->
+    <string name="pin_sub">برای خروج از صفحهٔ نمایشگر رمز را وارد کنید</string>
+    <string name="pin_timeout">پس از ۳۰ ثانیه بدون ورودی بسته می‌شود</string>
+    <string name="pin_unlock">باز کردن</string>
+    <string name="pin_locked">تلاش اشتباه زیاد بود. %1$d ثانیه دیگر دوباره امتحان کنید.</string>
+    <string name="setup_brand">SecureEntry Door</string>
+    <string name="setup_title">این گوشی را به یک در تبدیل کنید</string>
+    <string name="setup_lead">یک بار آن را به سازمان خود وصل کنید؛ پس از آن مستقیم با صفحهٔ نمایشگر باز می‌شود.</string>
+    <string name="step_connect">اتصال به سرور</string>
+    <string name="step_pin">تعیین رمز مدیر</string>
+    <string name="step_kiosk">حالت نمایشگر</string>
+    <string name="step_of">مرحلهٔ %1$d از ۳</string>
+    <string name="connect_title">اتصال به سازمان شما</string>
+    <string name="connect_lead">در پنل SecureEntry به «درب‌ها ← در جدید» بروید و آدرس سرور و کلید در را که آن‌جا نمایش داده می‌شود وارد کنید.</string>
+    <string name="test_conn">بررسی اتصال</string>
+    <string name="connected_full">متصل شد: %1$s</string>
+    <string name="pin_set_title">رمز مدیر را تعیین کنید</string>
+    <string name="pin_set_lead">این رمز برای خروج از نمایشگر یا تغییر این تنظیمات لازم است. فقط عدد؛ خالی = بدون رمز.</string>
+    <string name="pin_repeat">تکرار رمز</string>
+    <string name="pin_mismatch">دو رمز یکسان نیستند.</string>
+    <string name="kiosk_title">حالت نمایشگر</string>
+    <string name="kiosk_lead">گوشی روی صفحهٔ در قفل شود و پس از روشن شدن خودکار باز شود.</string>
+    <string name="next">ادامه</string>
+    <string name="back">بازگشت</string>
 </resources>
