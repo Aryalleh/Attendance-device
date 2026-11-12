@@ -1,4 +1,4 @@
-// RFID access controller — Wemos D1 mini + RC522
+// RFID access controller — Wemos D1 mini (ESP8266) or ESP32 DevKit + RC522
 //
 //  * standalone mode: card list, access log and admin panel live on the device
 //  * server mode:     the device asks the server for every scan; a cached card
@@ -6,13 +6,7 @@
 //                     offline events are uploaded when it comes back.
 
 #include <Arduino.h>
-#include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
-#include <ESP8266HTTPClient.h>
-#include <WiFiClientSecureBearSSL.h>
 #include <memory>
-#include <ESP8266mDNS.h>
-#include <LittleFS.h>
 #include <SPI.h>
 #include <MFRC522.h>
 #include <ArduinoJson.h>
@@ -20,6 +14,7 @@
 #include <sys/time.h>
 
 #include "config.h"
+#include "platform.h"
 #include "settings.h"
 #include "storage.h"
 #include "feedback.h"
@@ -32,7 +27,7 @@ EventLog evlog;
 OfflineQueue offlineQ;
 Feedback fb;
 MFRC522 rfid(PIN_RC522_SS, PIN_RC522_RST);
-ESP8266WebServer web(80);
+WebServerT web(80);
 
 // runtime state
 bool setupAp = false;
@@ -79,10 +74,12 @@ void setLast(const String& uid, const String& name, const char* result) {
 //
 // serverUrl may be http:// (Flask server on the LAN) or https:// (Cloudflare
 // Worker, which is HTTPS-only). For https the connection is encrypted but the
-// certificate is NOT verified (setInsecure): the ESP8266 has no CA store and
+// certificate is NOT verified (setInsecure): the device has no CA store and
 // Cloudflare rotates certificates. Someone who can intercept the device's
 // traffic could impersonate the server and read the device key.
+#if defined(ESP8266)
 BearSSL::Session tlsSession;   // reused so later requests skip the slow full handshake
+#endif
 
 // Failover: requests go to serverUrl; after a request gets no HTTP reply at all
 // they go to serverUrl2 (if set), and the primary is retried every few minutes.
@@ -112,9 +109,11 @@ bool serverIsHttps() { return activeUrl().startsWith("https://"); }
 
 std::unique_ptr<WiFiClient> serverClient() {
   if (!serverIsHttps()) return std::unique_ptr<WiFiClient>(new WiFiClient());
-  auto* c = new BearSSL::WiFiClientSecure();
+  auto* c = new SecureClientT();
   c->setInsecure();
+#if defined(ESP8266)
   c->setSession(&tlsSession);
+#endif
   return std::unique_ptr<WiFiClient>(c);
 }
 
@@ -123,18 +122,25 @@ int postJson(const char* path, JsonDocument& req, JsonDocument& resp) {
   auto client = serverClient();
   HTTPClient http;
   http.setTimeout(serverIsHttps() ? SERVER_TIMEOUT_TLS_MS : SERVER_TIMEOUT_MS);
+#if defined(ESP32)
+  http.setConnectTimeout(serverIsHttps() ? SERVER_TIMEOUT_TLS_MS : SERVER_TIMEOUT_MS);
+#endif
   if (!http.begin(*client, activeUrl() + path)) return -1;
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Device-Key", activeKey());
   String body;
   serializeJson(req, body);
-  uint32_t heapBefore = ESP.getFreeHeap(), blockBefore = ESP.getMaxFreeBlockSize(), t0 = millis();
+  uint32_t heapBefore = ESP.getFreeHeap(), blockBefore = Plat::maxFreeBlock(), t0 = millis();
   int code = http.POST(body);
   if (code > 0) lastNetOkMs = millis();   // any HTTP reply proves the link works
   if (code <= 0 && serverIsHttps()) {
     // why did the HTTPS connection fail? memory (TLS needs one ~17 KB block), timeout, or a TLS error
     char err[64] = "";
-    int e = static_cast<BearSSL::WiFiClientSecure*>(client.get())->getLastSSLError(err, sizeof(err));
+#if defined(ESP32)
+    int e = static_cast<SecureClientT*>(client.get())->lastError(err, sizeof(err));
+#else
+    int e = static_cast<SecureClientT*>(client.get())->getLastSSLError(err, sizeof(err));
+#endif
     Serial.printf("[tls] failed after %lu ms: ssl error %d %s; before: heap %u, largest block %u\n",
                   (unsigned long)(millis() - t0), e, err, heapBefore, blockBefore);
   }
@@ -151,6 +157,9 @@ void fetchCards(const String& version) {
   auto client = serverClient();
   HTTPClient http;
   http.setTimeout(serverIsHttps() ? 8000 : 4000);
+#if defined(ESP32)
+  http.setConnectTimeout(serverIsHttps() ? 8000 : 4000);
+#endif
   if (!http.begin(*client, activeUrl() + "/api/v1/cards")) return;
   http.addHeader("X-Device-Key", activeKey());
   int code = http.GET();
@@ -183,7 +192,7 @@ void syncServer() {
   req["cards_version"] = cacheVersion;
   JsonArray ev = req["events"].to<JsonArray>();
   bool hadQueue = false;
-  File f = LittleFS.open("/queue.tsv", "r");
+  File f = Plat::openRead("/queue.tsv");
   if (f) {
     while (f.available()) {
       String line = f.readStringUntil('\n');
@@ -515,7 +524,7 @@ void setupWeb() {
     startChunked("text/csv");
     web.sendContent("\xEF\xBB\xBF" "تاریخ,ساعت,نام,شناسه کارت,نتیجه,جهت,تاریخ میلادی\n");
     for (const char* path : {"/log.old", "/log.tsv"}) {
-      File f = LittleFS.open(path, "r");
+      File f = Plat::openRead(path);
       if (!f) continue;
       while (f.available()) {
         String line = f.readStringUntil('\n');
@@ -602,7 +611,9 @@ const char* wifiStatusText(wl_status_t st) {
   switch (st) {
     case WL_NO_SSID_AVAIL:   return "network not found (out of range, 5 GHz only, or SSID typo)";
     case WL_CONNECT_FAILED:  return "connection failed";
+#if defined(ESP8266)
     case WL_WRONG_PASSWORD:  return "wrong password";
+#endif
     case WL_DISCONNECTED:    return "disconnected / still trying";
     case WL_IDLE_STATUS:     return "idle";
     case WL_CONNECTED:       return "connected";
@@ -622,13 +633,12 @@ void logWifiFailure() {
                     WiFi.channel(i), WiFi.RSSI(i), WiFi.encryptionType(i));
     }
   }
-  if (!seen) Serial.printf("[wifi]   \"%s\" not visible to the ESP8266 (%d networks found)\n", S.wifiSsid.c_str(), n);
+  if (!seen) Serial.printf("[wifi]   \"%s\" not visible to the " BOARD_NAME " (%d networks found)\n", S.wifiSsid.c_str(), n);
   WiFi.scanDelete();
 }
 
-String setupApName() { return "RFID-Setup-" + String(ESP.getChipId(), HEX); }
+String setupApName() { return "RFID-Setup-" + String(Plat::chipId(), HEX); }
 
-WiFiEventHandler onDisconnect, onGotIp;
 
 // Radio settings: the chip's defaults (802.11n, full power) without modem sleep,
 // which some routers mishandle. If joining keeps failing we alternate to 802.11g
@@ -639,40 +649,58 @@ WiFiEventHandler onDisconnect, onGotIp;
 bool phyG = false;
 uint32_t joinStartMs = 0;
 
-void configureRadio() {
-  WiFi.setPhyMode(phyG ? WIFI_PHY_MODE_11G : WIFI_PHY_MODE_11N);
-  WiFi.setSleepMode(WIFI_NONE_SLEEP);
-}
+void configureRadio() { Plat::configureRadio(phyG); }
 
 void beginJoin() {
+#if defined(ESP32)
+  WiFi.disconnect();   // the ESP32 refuses a new config while still trying the old join
+#endif
   configureRadio();
   WiFi.begin(S.wifiSsid.c_str(), S.wifiPass.c_str());
   joinStartMs = millis();
   Serial.printf("[wifi] joining \"%s\" (802.11%s)\n", S.wifiSsid.c_str(), phyG ? "g" : "n");
 }
 
-void startNetwork() {
-  WiFi.persistent(false);
-  onDisconnect = WiFi.onStationModeDisconnected([](const WiFiEventStationModeDisconnected& e) {
-    // log every reason; collapse rapid repeats of the same one
-    static uint8_t lastReason = 0;
-    static uint32_t lastMs = 0;
-    static uint16_t repeats = 0;
-    uint32_t now = millis();
-    if (e.reason != lastReason || now - lastMs > 10000) {
-      if (repeats) Serial.printf("[wifi] (reason %d repeated %u more times)\n", lastReason, repeats);
-      Serial.printf("[wifi] router disconnect reason %d\n", e.reason);
-      lastReason = e.reason;
-      lastMs = now;
-      repeats = 0;
-    } else {
-      repeats++;
-    }
-  });
+// log every disconnect reason; collapse rapid repeats of the same one
+void logDisconnect(uint8_t reason) {
+  static uint8_t lastReason = 0;
+  static uint32_t lastMs = 0;
+  static uint16_t repeats = 0;
+  uint32_t now = millis();
+  if (reason != lastReason || now - lastMs > 10000) {
+    if (repeats) Serial.printf("[wifi] (reason %d repeated %u more times)\n", lastReason, repeats);
+    Serial.printf("[wifi] router disconnect reason %d\n", reason);
+    lastReason = reason;
+    lastMs = now;
+    repeats = 0;
+  } else {
+    repeats++;
+  }
+}
+
+#if defined(ESP8266)
+WiFiEventHandler onDisconnect, onGotIp;
+#endif
+
+void registerWifiEvents() {
+#if defined(ESP32)
+  WiFi.onEvent([](WiFiEvent_t, WiFiEventInfo_t info) { logDisconnect(info.wifi_sta_disconnected.reason); },
+               ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+  WiFi.onEvent([](WiFiEvent_t, WiFiEventInfo_t info) {
+    Serial.printf("[wifi] got IP %s\n", IPAddress(info.got_ip.ip_info.ip.addr).toString().c_str());
+  }, ARDUINO_EVENT_WIFI_STA_GOT_IP);
+#else
+  onDisconnect = WiFi.onStationModeDisconnected([](const WiFiEventStationModeDisconnected& e) { logDisconnect(e.reason); });
   onGotIp = WiFi.onStationModeGotIP([](const WiFiEventStationModeGotIP& e) {
     Serial.printf("[wifi] got IP %s\n", e.ip.toString().c_str());
   });
-  WiFi.hostname(S.deviceName);
+#endif
+}
+
+void startNetwork() {
+  WiFi.persistent(false);
+  registerWifiEvents();
+  Plat::setHostname(S.deviceName);
 
   if (!S.isServerMode() && S.apOnly) {
     WiFi.mode(WIFI_AP);
@@ -764,9 +792,8 @@ void handleSerial() {
                     WiFi.dnsIP().toString().c_str(), WiFi.RSSI());
       auto tcp = [](const IPAddress& ip, uint16_t port, const char* what) {
         WiFiClient c;
-        c.setTimeout(3000);
         uint32_t t = millis();
-        bool ok = c.connect(ip, port);
+        bool ok = Plat::tcpConnect(c, ip, port, 3000);
         Serial.printf("[net] TCP %s %s:%u -> %s (%lu ms)\n", what, ip.toString().c_str(), port,
                       ok ? "OK" : "FAILED", (unsigned long)(millis() - t));
         c.stop();
@@ -858,26 +885,27 @@ void setup() {
   Serial.println("\n[boot] RFID access controller " FW_VERSION);
   fb.begin();
 
-  if (!LittleFS.begin()) {
-    Serial.println("[boot] formatting filesystem");
-    LittleFS.format();
-    LittleFS.begin();
-  }
+  Serial.println("[boot] board " BOARD_NAME);
+  if (!Plat::fsBegin()) Serial.println("[boot] filesystem could not be mounted");
   if (!S.load()) S.save();
   localCards.load();
   cacheCards.load();
-  File f = LittleFS.open("/cache.ver", "r");
+  File f = Plat::openRead("/cache.ver");
   if (f) { cacheVersion = f.readString(); f.close(); }
 
+#if defined(ESP32)
+  SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, PIN_RC522_SS);
+#else
   SPI.begin();
+#endif
   rfid.PCD_Init();
   readerOk = checkReader();
   byte ver = rfid.PCD_ReadRegister(MFRC522::VersionReg);
   Serial.printf("[boot] reader %s (version 0x%02X), mode %s, %u cards\n", readerOk ? "OK" : "NOT FOUND",
                 ver, S.mode.c_str(), activeCards().cards.size());
   if (!readerOk)
-    Serial.println(ver == 0xFF ? "[rfid] 0xFF: MISO not connected/floating, or SDA(D8) not wired"
-                               : "[rfid] 0x00: RC522 unpowered (3.3V/GND), held in reset (RST->D0), or MISO shorted to GND");
+    Serial.println(ver == 0xFF ? "[rfid] 0xFF: MISO not connected/floating, or SDA(" LABEL_RC522_SS ") not wired"
+                               : "[rfid] 0x00: RC522 unpowered (3.3V/GND), held in reset (RST->" LABEL_RC522_RST "), or MISO shorted to GND");
 
   startNetwork();
   if (WiFi.status() == WL_CONNECTED) configTime(0, 0, S.ntpServer.c_str());
@@ -891,7 +919,7 @@ void setup() {
 void loop() {
   uint32_t ms = millis();
   web.handleClient();
-  MDNS.update();
+  Plat::mdnsUpdate();
   fb.update();
 
   maintainWifi(ms);

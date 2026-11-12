@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include "platform.h"
 
 // Persistent device configuration, stored in /config.json and edited from
 // the local web panel.
@@ -26,7 +27,7 @@ struct Settings {
   bool isServerMode() const { return mode == "server"; }
 
   bool load() {
-    File f = LittleFS.open("/config.json", "r");
+    File f = Plat::openRead("/config.json");
     if (!f) return false;
     JsonDocument d;
     DeserializationError e = deserializeJson(d, f);

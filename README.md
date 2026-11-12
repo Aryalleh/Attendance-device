@@ -1,6 +1,6 @@
 **English** | [فارسی](README.fa.md)
 
-# RFID attendance & access control (Wemos D1 mini + RC522)
+# RFID attendance & access control (Wemos D1 mini or ESP32 + RC522)
 
 A card reader that identifies people by RFID card and shows the result with LEDs
 and a buzzer: green and a short beep for allowed cards, red and an alarm for unknown
@@ -33,7 +33,7 @@ You switch modes in the device's own panel (Settings → Mode). No display is ne
 
 | Folder | Contents |
 |---|---|
-| `firmware/` | Wemos firmware (C++, PlatformIO) |
+| `firmware/` | Device firmware for the Wemos D1 mini or an ESP32 DevKit (C++, PlatformIO) |
 | `server/` | Server and web panel (Python, Flask, SQLite) |
 | `hardware/` | Carrier PCB (KiCad 10): schematic, 2-layer layout, gerbers, renders |
 | `docs/` | Assembly guide (EN/FA) and project proposal |
@@ -50,7 +50,7 @@ regulator makes 3.3 V for the RC522. Full step-by-step instructions are in the
 
 | Part | Notes |
 |---|---|
-| Wemos D1 mini (ESP8266) | |
+| Wemos D1 mini (ESP8266) **or** ESP32 DevKit (ESP-WROOM-32, 30/38-pin) | see [ESP32 wiring](#esp32-devkit-wiring) for the ESP32 |
 | RC522 RFID module + 13.56 MHz cards/tags | **3.3 V only** |
 | Green LED + red LED + 2 × 220 Ω resistors | or an LED module |
 | Buzzer | a low-level-trigger buzzer module, or a 5 V active buzzer with the 2-transistor driver from the assembly guide |
@@ -101,6 +101,28 @@ LED, so that LED lights while access is granted.
 
 Pins and active-high/low polarity are set in `firmware/src/config.h`.
 
+### ESP32 DevKit wiring
+
+The same firmware also runs on an ESP32 DevKit (ESP-WROOM-32). The RC522 uses the ESP32's
+default SPI pins:
+
+| RC522 | ESP32 | | Module | ESP32 |
+|---|---|---|---|---|
+| SDA (SS) | G5 | | Green LED | G25 |
+| SCK | G18 | | Red LED | G26 |
+| MOSI | G23 | | Buzzer | G27 |
+| MISO | G19 | | *(optional)* Relay IN | G32 |
+| RST | G0 | | | |
+| 3.3V | 3V3 | | | |
+| GND | GND | | | |
+| IRQ | — | | | |
+
+The ESP32 has no boot-pin limits on G25/G26/G27/G32, so any buzzer works there. Set
+`BUZZER_ACTIVE_LOW` to match your buzzer. G0 is also the board's **BOOT** button, so
+holding BOOT resets the reader. To move RST, change `PIN_RC522_RST` in `config.h`
+(G4 or G22 are good choices). The carrier PCB in `hardware/` is for the D1 mini only.
+Power the DevKit from its USB port; its 3V3 pin feeds the RC522.
+
 ### Signals
 
 | What you see/hear | Meaning |
@@ -121,9 +143,12 @@ Install [PlatformIO](https://platformio.org/) (VS Code extension or `pip install
 
 ```bash
 cd firmware
-pio run -t upload        # build + flash
-pio device monitor       # serial log, 115200 baud
+pio run -t upload                 # Wemos D1 mini: build + flash
+pio run -e esp32dev -t upload     # ESP32 DevKit: build + flash
+pio device monitor                # serial log, 115200 baud
 ```
+
+On some ESP32 boards you have to hold **BOOT** while the upload starts.
 
 Don't run `pio run -t uploadfs`: it erases the saved settings and cards.
 

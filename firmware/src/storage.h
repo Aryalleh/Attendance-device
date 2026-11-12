@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <LittleFS.h>
+#include "platform.h"
 #include <vector>
 #include "config.h"
 
@@ -68,7 +69,7 @@ class CardStore {
 
   void load() {
     cards.clear();
-    File f = LittleFS.open(_path, "r");
+    File f = Plat::openRead(_path);
     if (!f) return;
     while (f.available() && cards.size() < MAX_CARDS) {
       String line = f.readStringUntil('\n');
@@ -169,7 +170,7 @@ class EventLog {
     std::vector<String> ring;
     ring.reserve(n);
     size_t head = 0;
-    File f = LittleFS.open("/log.tsv", "r");
+    File f = Plat::openRead("/log.tsv");
     if (f) {
       while (f.available()) {
         String line = f.readStringUntil('\n');
@@ -201,7 +202,7 @@ class OfflineQueue {
     f.close();
   }
   bool empty() {
-    File f = LittleFS.open("/queue.tsv", "r");
+    File f = Plat::openRead("/queue.tsv");
     bool e = !f || f.size() == 0;
     if (f) f.close();
     return e;
