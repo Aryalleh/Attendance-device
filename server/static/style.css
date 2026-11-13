@@ -233,3 +233,8 @@ body.pub{background:var(--bg)}
 @media (max-width:1000px){.bgrid{grid-template-columns:1fr}.usages{grid-template-columns:1fr;gap:18px}}
 @media (max-width:600px){.banner{flex-direction:column;align-items:flex-start;padding:20px}.cphead{flex-direction:column}}
 @media print{.side,.topbar,.noprint,.flash{display:none!important}.appmain>main{padding:0}.box{border:0}}
+/* parent page */
+.parent h1{margin:4px 0 12px}
+.pstat{display:flex;flex-direction:column;gap:4px;padding:14px 16px;border-radius:12px;font-size:20px;font-weight:700;margin:0}
+.pstat small{font-size:14px;font-weight:500}
+.pstat.ok{background:var(--okbg);color:var(--ok)}.pstat.warn{background:var(--warnbg);color:var(--warn)}.pstat.mut{background:var(--soft);color:var(--fg)}

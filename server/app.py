@@ -182,7 +182,7 @@ def load_user():
     """g.user: the logged-in user; g.owner: server owner; g.org: the company being viewed."""
     g.user = g.org = None
     g.owner = False
-    if request.path.startswith(("/api/", "/static/", "/kiosk/")):
+    if request.path.startswith(("/api/", "/static/", "/kiosk/", "/parent/")):
         return
     uid = session.get("uid")
     if not uid:
@@ -640,8 +640,10 @@ def register_routes(app):
         history = db.execute(EVENT_SELECT + "WHERE e.card_id = ? ORDER BY e.ts DESC LIMIT 30", (card_id,)).fetchall()
         classes = db.execute("SELECT k.* FROM classes k JOIN class_members m ON m.class_id = k.id "
                              "WHERE m.card_id = ? ORDER BY k.name", (card_id,)).fetchall()
+        row = own_row("cards", card_id)
+        parent_url = url_for("parent_page", key=row["parent_key"], _external=True) if row["parent_key"] else None
         return render_template("card_form.html", card=card, new=False, card_id=card_id, history=history,
-                               classes=classes)
+                               classes=classes, parent_url=parent_url)
 
     @app.post("/cards/<int:card_id>/toggle")
     @login_required
@@ -663,6 +665,32 @@ def register_routes(app):
         db.commit()
         flash("کارت حذف شد. سوابق تردد آن حفظ می‌شود.", "ok")
         return redirect(url_for("cards"))
+
+    # ---- parent link: a private page per card for the child's parents ----
+
+    @app.post("/cards/<int:card_id>/parent-link")
+    @login_required
+    def card_parent_link(card_id):
+        own_row("cards", card_id)
+        db = get_db()
+        if request.form.get("action") == "off":
+            db.execute("UPDATE cards SET parent_key = NULL WHERE id = ?", (card_id,))
+            flash("لینک والدین غیرفعال شد.", "ok")
+        else:
+            db.execute("UPDATE cards SET parent_key = ? WHERE id = ?", (secrets.token_urlsafe(18), card_id))
+            flash("لینک جدید والدین ساخته شد. لینک قبلی دیگر کار نمی‌کند.", "ok")
+        db.commit()
+        return redirect(url_for("card_edit", card_id=card_id) + "#parent")
+
+    @app.get("/parent/<key>")
+    def parent_page(key):
+        db = get_db()
+        card = db.execute("SELECT c.*, o.name AS org_name, o.enabled AS org_enabled FROM cards c "
+                          "JOIN orgs o ON o.id = c.org_id WHERE c.parent_key = ?", (key,)).fetchone()
+        if card is None or not card["org_enabled"]:
+            abort(404)
+        return render_template("parent.html", card=card, rep=store.parent_report(db, card),
+                               today=date.today())
 
     # ---- doors (devices) ----
 

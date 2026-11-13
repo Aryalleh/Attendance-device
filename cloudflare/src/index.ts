@@ -856,7 +856,7 @@ async function adminBilling(c: Ctx, action: string, orgId: number): Promise<bool
 const text = (body: string, type = "text/plain") =>
   new Response(body, { headers: { "Content-Type": `${type}; charset=utf-8`, "Cache-Control": "public, max-age=3600" } });
 
-const PRIVATE_PATHS = ["/api/", "/kiosk/", "/live/", "/billing", "/store", "/dashboard", "/cards", "/doors", "/classes", "/events", "/attendance", "/settings", "/admin", "/logout"];
+const PRIVATE_PATHS = ["/api/", "/kiosk/", "/parent/", "/live/", "/billing", "/store", "/dashboard", "/cards", "/doors", "/classes", "/events", "/attendance", "/settings", "/admin", "/logout"];
 
 function robotsTxt(c: Ctx) {
   const dis = PRIVATE_PATHS.map((p) => `Disallow: ${p}`).join("\n");
@@ -1030,7 +1030,56 @@ async function cardEdit(c: Ctx, id: number) {
     all(c.db, EVENT_SELECT + "WHERE e.card_id = ? ORDER BY e.ts DESC LIMIT 30", id),
     all(c.db, "SELECT k.* FROM classes k JOIN class_members m ON m.class_id = k.id WHERE m.card_id = ? ORDER BY k.name", id),
   ]);
-  return page(V.cardFormPage(pageCtx(c), { card, isNew: false, cardId: id, history, classes }));
+  const row = await ownRow(c, "cards", id);
+  const parentUrl = row.parent_key ? `${c.url.origin}/parent/${row.parent_key}` : undefined;
+  return page(V.cardFormPage(pageCtx(c), { card, isNew: false, cardId: id, history, classes, parentUrl }));
+}
+
+// --- parent link: a private page per card for the child's parents ---------------------------
+
+async function cardParentLink(c: Ctx, id: number) {
+  await ownRow(c, "cards", id);
+  if (formStr(c, "action") === "off") {
+    await run(c.db, "UPDATE cards SET parent_key = NULL WHERE id = ?", id);
+    c.session.flash("لینک والدین غیرفعال شد.", "ok");
+  } else {
+    await run(c.db, "UPDATE cards SET parent_key = ? WHERE id = ?", randomToken(18), id);
+    c.session.flash("لینک جدید والدین ساخته شد. لینک قبلی دیگر کار نمی‌کند.", "ok");
+  }
+  return redirect(`/cards/${id}#parent`);
+}
+
+/** Today's status and the arrival/departure of recent days (newest first) for one card. */
+async function parentReport(c: Ctx, cardId: number, days = 14): Promise<V.ParentReport> {
+  const day0 = today();
+  const [start] = dayBounds(J.addDays(day0, -days * 3));
+  const rows = await all(c.db,
+    "SELECT ts, direction FROM events WHERE card_id = ? AND result = 'granted' AND direction IN ('in', 'out') "
+    + "AND ts >= ? ORDER BY ts, id", cardId, start);
+  const byDay = new Map<string, V.ParentDay & { last: Row }>();
+  for (const r of rows) {
+    const d = localDate(r.ts);
+    let day = byDay.get(d);
+    if (!day) byDay.set(d, (day = { date: d, firstIn: null, lastOut: null, last: r }));
+    if (r.direction === "in" && day.firstIn === null) day.firstIn = r.ts;
+    if (r.direction === "out") day.lastOut = r.ts;
+    day.last = r;
+  }
+  const t = byDay.get(day0) || null;
+  const recent = [...byDay.values()].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, days);
+  return {
+    status: t ? (t.last.direction as "in" | "out") : "none",
+    since: t ? t.last.ts : null,
+    today: t,
+    days: recent,
+  };
+}
+
+async function parentPage(c: Ctx, key: string) {
+  const card = await first(c.db, "SELECT c.*, o.name AS org_name, o.enabled AS org_enabled FROM cards c "
+    + "JOIN orgs o ON o.id = c.org_id WHERE c.parent_key = ?", key);
+  if (!card || !card.org_enabled) return page(V.errorPage(404, "این لینک معتبر نیست."), 404);
+  return page(V.parentPage(card, await parentReport(c, card.id), today()));
 }
 
 async function cardToggle(c: Ctx, id: number) {
@@ -1587,6 +1636,8 @@ route("GET,POST", "/cards/new", "card_new", cardNew);
 route("GET,POST", "/cards/:int", "card_edit", cardEdit);
 route("POST", "/cards/:int/toggle", "card_toggle", cardToggle);
 route("POST", "/cards/:int/delete", "card_delete", cardDelete);
+route("POST", "/cards/:int/parent-link", "card_parent_link", cardParentLink);
+route("GET", "/parent/:token", "parent", parentPage, "none");
 route("GET", "/doors", "doors", doors);
 route("POST", "/doors/new", "door_new", doorNew);
 route("POST", "/doors/:int", "door_edit", doorEdit);

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ card.name }} · حضور در {{ card.org_name }}{% endblock %}
+{% block body %}
+<meta http-equiv="refresh" content="60">
+<div class="box parent">
+  <p class="mut">{{ card.org_name }} · {{ today|jlong }}</p>
+  <h1>{{ card.name }}</h1>
+  {% if rep.status == 'in' %}
+  <p class="pstat ok">در مدرسه است<small>رسیدن: ساعت {{ rep.today.first_in|jtime }}</small></p>
+  {% elif rep.status == 'out' %}
+  <p class="pstat mut">از مدرسه رفته است<small>رفتن: ساعت {{ rep.since|jtime }}{% if rep.today.first_in %} · رسیدن: ساعت {{ rep.today.first_in|jtime }}{% endif %}</small></p>
+  {% else %}
+  <p class="pstat warn">امروز هنوز ورودی ثبت نشده است</p>
+  {% endif %}
+</div>
+<div class="box">
+  <h2>روزهای اخیر</h2>
+  {% if rep.days %}
+  <div class="scroll"><table>
+    <tr><th>تاریخ</th><th>رسیدن</th><th>رفتن</th></tr>
+    {% for d in rep.days %}
+    <tr><td>{{ d.date|jlong }}</td><td>{{ d.first_in|jtime }}</td><td>{{ d.last_out|jtime }}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="mut">هنوز ترددی ثبت نشده است.</p>{% endif %}
+</div>
+<p class="mut sm">این صفحه هر دقیقه به‌روز می‌شود. این لینک خصوصی است؛ آن را فقط با اعضای خانواده به اشتراک بگذارید.</p>
+{% endblock %}

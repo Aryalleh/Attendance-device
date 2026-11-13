@@ -272,6 +272,7 @@ the system font (Tahoma/Segoe UI).
 - **Classes**: members, weekly or one-off schedules on a device, per-session and per-member attendance reports.
 - **Log**: filter by name, UID, result, device, class and date; CSV export.
 - **Daily attendance**: first in, last out and time on site per person per day.
+- **Parent link** (on each card's page): a private page, no login, where parents see whether their child is at school now, when they arrived and left today, and the last 14 days. **New link** revokes the old one; **Disable** turns it off. Anyone with the link can see that one child's times, so give it only to the family.
 - **Settings**: the company's panel users, purging the company's old events.
 - **Server admin** (owners only): companies, their users, integrations.
 

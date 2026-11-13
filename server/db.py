@@ -77,7 +77,7 @@ def connect(path):
 
 
 MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations")
-MIGRATIONS = [(2, "0002_multitenant.sql")]
+MIGRATIONS = [(2, "0002_multitenant.sql"), (3, "0003_parent_link.sql")]
 
 
 def init_db(path):
@@ -161,6 +161,34 @@ def last_direction(db, card_id):
         (card_id,),
     ).fetchone()
     return row[0] if row else None
+
+
+# --- parent link -----------------------------------------------------------
+
+def parent_report(db, card, today=None, days=14):
+    """What a parent sees: today's status and the arrival/departure of recent days.
+
+    status: 'in' (at school since `since`), 'out' (left at `since`) or 'none' (no scan today).
+    days:   newest first, [{date, first_in, last_out}] for days with at least one scan.
+    """
+    today = today or date.today()
+    start = int(datetime.combine(today - timedelta(days=days * 3), datetime.min.time()).timestamp())
+    rows = db.execute(
+        "SELECT ts, direction FROM events WHERE card_id = ? AND result = 'granted' "
+        "AND direction IN ('in', 'out') AND ts >= ? ORDER BY ts, id", (card["id"], start)).fetchall()
+    by_day = {}
+    for r in rows:
+        d = datetime.fromtimestamp(r["ts"]).date()
+        day = by_day.setdefault(d, {"date": d, "first_in": None, "last_out": None, "last": None})
+        if r["direction"] == "in" and day["first_in"] is None:
+            day["first_in"] = r["ts"]
+        if r["direction"] == "out":
+            day["last_out"] = r["ts"]
+        day["last"] = r
+    t = by_day.get(today)
+    status, since = ("none", None) if not t else (t["last"]["direction"], t["last"]["ts"])
+    recent = sorted(by_day.values(), key=lambda x: x["date"], reverse=True)[:days]
+    return {"status": status, "since": since, "today": t, "days": recent}
 
 
 # --- events ----------------------------------------------------------------

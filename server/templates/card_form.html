@@ -28,6 +28,25 @@
   <h2>کلاس‌ها</h2>
   {% for k in classes %}<a class="pill ok" href="{{ url_for('class_view', class_id=k.id) }}">{{ k.name }}</a> {% else %}<p class="mut">عضو هیچ کلاسی نیست. اعضای هر کلاس از صفحهٔ همان کلاس انتخاب می‌شوند.</p>{% endfor %}
 </div>
+<div class="box" id="parent">
+  <h2>لینک والدین</h2>
+  <p class="mut">یک صفحهٔ خصوصی که والدین بدون ورود به پنل می‌بینند فرزندشان کی رسید، کی رفت و الان در مدرسه هست یا نه.</p>
+  {% if parent_url %}
+  <div class="row">
+    <input id="plink" class="mono" dir="ltr" value="{{ parent_url }}" readonly onclick="this.select()">
+    <button type="button" class="btn sec auto" onclick="navigator.clipboard.writeText(document.getElementById('plink').value);this.textContent='کپی شد'">کپی</button>
+  </div>
+  <form method="post" action="{{ url_for('card_parent_link', card_id=card_id) }}" class="row" style="margin-top:8px">
+    {{ csrf() }}
+    <button class="btn sec auto" name="action" value="new" onclick="return confirm('لینک فعلی از کار می‌افتد. ادامه می‌دهید؟')">ساخت لینک جدید</button>
+    <button class="btn sec auto" name="action" value="off">غیرفعال کردن</button>
+  </form>
+  {% else %}
+  <form method="post" action="{{ url_for('card_parent_link', card_id=card_id) }}">
+    {{ csrf() }}<button class="btn auto" name="action" value="new">ساخت لینک والدین</button>
+  </form>
+  {% endif %}
+</div>
 <div class="box">
   <h2>سوابق تردد</h2>
   {{ events_table(history) }}

@@ -392,7 +392,7 @@ ${v.cards.length ? v.cards.map((k) => html`
 </div>`);
 }
 
-export function cardFormPage(c: PageCtx, v: { card: Row; isNew: boolean; cardId?: number; history?: Row[]; classes?: Row[] }) {
+export function cardFormPage(c: PageCtx, v: { card: Row; isNew: boolean; cardId?: number; history?: Row[]; classes?: Row[]; parentUrl?: string }) {
   const k = v.card;
   const enabled = k.enabled && k.enabled !== "0";
   return layout(c, `${v.isNew ? "کارت جدید" : k.name} · کنترل تردد`, html`
@@ -421,6 +421,23 @@ ${!v.isNew ? html`
   <h2>کلاس‌ها</h2>
   ${v.classes?.length ? v.classes.map((k) => html`<a class="pill ok" href="/classes/${k.id}">${k.name}</a> `)
     : html`<p class="mut">عضو هیچ کلاسی نیست. اعضای هر کلاس از صفحهٔ همان کلاس انتخاب می‌شوند.</p>`}
+</div>
+<div class="box" id="parent">
+  <h2>لینک والدین</h2>
+  <p class="mut">یک صفحهٔ خصوصی که والدین بدون ورود به پنل می‌بینند فرزندشان کی رسید، کی رفت و الان در مدرسه هست یا نه.</p>
+  ${v.parentUrl ? html`
+  <div class="row">
+    <input id="plink" class="mono" dir="ltr" value="${v.parentUrl}" readonly onclick="this.select()">
+    <button type="button" class="btn sec auto" onclick="navigator.clipboard.writeText(document.getElementById('plink').value);this.textContent='کپی شد'">کپی</button>
+  </div>
+  <form method="post" action="/cards/${v.cardId}/parent-link" class="row" style="margin-top:8px">
+    ${csrf(c)}
+    <button class="btn sec auto" name="action" value="new" onclick="return confirm('لینک فعلی از کار می‌افتد. ادامه می‌دهید؟')">ساخت لینک جدید</button>
+    <button class="btn sec auto" name="action" value="off">غیرفعال کردن</button>
+  </form>` : html`
+  <form method="post" action="/cards/${v.cardId}/parent-link">
+    ${csrf(c)}<button class="btn auto" name="action" value="new">ساخت لینک والدین</button>
+  </form>`}
 </div>
 <div class="box">
   <h2>سوابق تردد</h2>
@@ -1181,6 +1198,40 @@ export function invoicePage(c: PageCtx, v: { inv: Row; org: Row; itemName: strin
   ${i.kind === "hardware" ? html`<p class="mut">نشانی ارسال: ${i.note}</p>` : ""}
   ${i.status === "paid" ? html`<p class="mut">کد پیگیری زرین‌پال: <span class="mono">${i.ref_id || "—"}</span>${i.card_pan ? html` · کارت <span class="mono">${i.card_pan}</span>` : ""}</p>` : ""}
 </div>`);
+}
+
+export type ParentDay = { date: string; firstIn: number | null; lastOut: number | null };
+export type ParentReport = { status: "in" | "out" | "none"; since: number | null; today: ParentDay | null; days: ParentDay[] };
+
+/** The login-free page a parent opens from their private link. */
+export function parentPage(card: Row, rep: ParentReport, day: string) {
+  const status = rep.status === "in"
+    ? html`<p class="pstat ok">در مدرسه است<small>رسیدن: ساعت ${jtime(rep.today!.firstIn)}</small></p>`
+    : rep.status === "out"
+      ? html`<p class="pstat mut">از مدرسه رفته است<small>رفتن: ساعت ${jtime(rep.since)}${rep.today!.firstIn ? html` · رسیدن: ساعت ${jtime(rep.today!.firstIn)}` : ""}</small></p>`
+      : html`<p class="pstat warn">امروز هنوز ورودی ثبت نشده است</p>`;
+  return html`<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<meta http-equiv="refresh" content="60">
+<title>${card.name} · حضور در ${card.org_name}</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css"></head>
+<body><main>
+<div class="box parent">
+  <p class="mut">${card.org_name} · ${J.jlong(day)}</p>
+  <h1>${card.name}</h1>
+  ${status}
+</div>
+<div class="box">
+  <h2>روزهای اخیر</h2>
+  ${rep.days.length ? html`<div class="scroll"><table>
+    <tr><th>تاریخ</th><th>رسیدن</th><th>رفتن</th></tr>
+    ${rep.days.map((d) => html`<tr><td>${J.jlong(d.date)}</td><td>${jtime(d.firstIn)}</td><td>${jtime(d.lastOut)}</td></tr>`)}
+  </table></div>` : html`<p class="mut">هنوز ترددی ثبت نشده است.</p>`}
+</div>
+<p class="mut sm">این صفحه هر دقیقه به‌روز می‌شود. این لینک خصوصی است؛ آن را فقط با اعضای خانواده به اشتراک بگذارید.</p>
+</main></body></html>`;
 }
 
 export function errorPage(status: number, message: string) {
